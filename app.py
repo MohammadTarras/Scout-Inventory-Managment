@@ -164,7 +164,7 @@ def generate_whatsapp_invoice_text(customer, cart_items, invoice_number, Paid):
 
         # Create formatted invoice text
         # Create formatted invoice text in English (no emojis)
-        invoice_text = f"""Thank you for visiting the Third Stationery Exhibition
+        invoice_text = f"""*Thank you for visiting the Third Stationery Exhibition*
 
 INVOICE #{invoice_number}
 Date: {datetime.now().strftime("%Y-%m-%d %H:%M")}
@@ -192,11 +192,11 @@ Phone: {customer['phone']}"""
         total_amount = sum(item['quantity'] * item['price'] for item in cart_items)
         invoice_text += f"TOTAL: ${total_amount:.2f}\n"
         invoice_text += "━━━━━━━━━━━━━━━━━━\n\n"
-        invoice_text += f"PAID: ${Paid:.2f}\n"
+        invoice_text += f"*PAID: ${Paid:.2f}*\n"
         invoice_text += "━━━━━━━━━━━━━━━━━━\n\n"
         invoice_text += f"Generated on {datetime.now().strftime('%Y-%m-%d at %H:%M')}\n\n"
 
-        invoice_text += "Best regards, The Muslim Scout - Bara ibn Malik Troop"
+        invoice_text += "Best regards,\n*The Muslim Scout - Bara ibn Malik Troop*"
 
         return invoice_text, total_amount
 
