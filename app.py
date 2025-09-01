@@ -159,37 +159,42 @@ def load_products():
     return False
 
 # Generate WhatsApp formatted invoice text
-def generate_whatsapp_invoice_text(customer, cart_items, invoice_number):
+def generate_whatsapp_invoice_text(customer, cart_items, invoice_number, Paid=None):
     total_amount = sum(item['quantity'] * item['price'] for item in cart_items)
     
     # Create formatted invoice text
+    # Create formatted invoice text
     invoice_text = f"""🧾 *INVOICE #{invoice_number}*
-📅 Date: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+    📅 Date: {datetime.now().strftime("%Y-%m-%d %H:%M")}
 
-👤 *BILL TO:*
-📋 Name: {customer['name']}
-📞 Phone: {customer['phone']}"""
-    
+    👤 *BILL TO*
+    ━━━━━━━━━━━━━━━━━━
+    📋 Name: {customer['name']}
+    📞 Phone: {customer['phone']}"""
+
     if customer.get('email'):
         invoice_text += f"\n📧 Email: {customer['email']}"
-    
+
     if customer.get('address'):
         invoice_text += f"\n📍 Address: {customer['address']}"
-    
-    invoice_text += "\n\n📦 *ITEMS:*\n"
-    invoice_text += "─" * 40 + "\n"
-    
+
+    invoice_text += "\n\n📦 *ITEMS*\n━━━━━━━━━━━━━━━━━━\n"
+
     for i, item in enumerate(cart_items, 1):
         item_total = item['quantity'] * item['price']
         invoice_text += f"{i}. {item['product']}\n"
-        invoice_text += f"   Qty: {item['quantity']} × ${item['price']:.2f} = ${item_total:.2f}\n\n"
+        invoice_text += f"   ➝ Qty: {item['quantity']} × ${item['price']:.2f}\n"
+        invoice_text += f"   ➝ Subtotal: ${item_total:.2f}\n\n"
+
+    invoice_text += "━━━━━━━━━━━━━━━━━━\n"
+    invoice_text += f"💰 *TOTAL: ${total_amount:.2f}*\n"
+    invoice_text += "━━━━━━━━━━━━━━━━━━\n\n"
+    invoice_text += f"💰 *PAID: ${Paid:.2f}*\n"
     
-    invoice_text += "─" * 40 + "\n"
-    invoice_text += f"💰 *TOTAL AMOUNT: ${total_amount:.2f}*\n"
-    invoice_text += "─" * 40 + "\n\n"
-    invoice_text += "🙏 Thank you for your business!\n"
-    invoice_text += f"📅 Generated: {datetime.now().strftime('%Y-%m-%d at %H:%M')}"
-    
+    invoice_text += "━━━━━━━━━━━━━━━━━━\n\n"
+
+    invoice_text += f"🕒 Generated on {datetime.now().strftime('%Y-%m-%d at %H:%M')}"
+
     return invoice_text, total_amount
 
 # Create WhatsApp link with formatted invoice text
@@ -763,7 +768,7 @@ def main_app():
                                         
                                         try:
                                             # Generate WhatsApp formatted invoice text
-                                            invoice_text, amount = generate_whatsapp_invoice_text(selected_customer, st.session_state.cart, invoice_number)
+                                            invoice_text, amount = generate_whatsapp_invoice_text(selected_customer, st.session_state.cart, invoice_number,paid_amount)
                                             
                                             # Save invoice record with payment info
                                             invoice_record = save_invoice_record(selected_customer, st.session_state.cart, invoice_number, amount, paid_amount)
@@ -771,9 +776,6 @@ def main_app():
                                             st.success(f"✅ Invoice {invoice_number} created successfully!")
                                             st.success(f"💰 Payment Status: {payment_status}")
                                             
-                                            # Display invoice text
-                                            with st.expander("📄 Invoice Text Preview", expanded=True):
-                                                st.text(invoice_text)
                                             
                                             # WhatsApp sharing
                                             st.markdown("### 📱 Send Invoice via WhatsApp")
@@ -783,18 +785,8 @@ def main_app():
                                             st.markdown(f"**[📱 Send via WhatsApp]({whatsapp_link})**")
                                             st.caption("Click to open WhatsApp with the formatted invoice")
                                             
-                                            # Copy text to clipboard
-                                            st.markdown("### 📋 Copy Invoice Text")
-                                            st.code(invoice_text, language=None)
-                                            st.caption("You can copy the text above and paste it manually in WhatsApp or any messaging app")
-                                            
-                                            # Clear session state
-                                            st.session_state.show_payment_popup = False
-                                            
-                                            # Clear cart option
-                                            if st.button("🗑️ Clear Cart & Create New Invoice"):
-                                                st.session_state.cart = []
-                                                st.rerun()
+                
+                    
                                                 
                                         except Exception as e:
                                             st.error(f"Error creating invoice: {str(e)}")
