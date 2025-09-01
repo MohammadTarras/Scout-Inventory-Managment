@@ -159,42 +159,44 @@ def load_products():
     return False
 
 # Generate WhatsApp formatted invoice text
-def generate_whatsapp_invoice_text(customer, cart_items, invoice_number, Paid=None):
+def generate_whatsapp_invoice_text(customer, cart_items, invoice_number, Paid):
     total_amount = sum(item['quantity'] * item['price'] for item in cart_items)
     
-    # Create formatted invoice text
-    # Create formatted invoice text
-    invoice_text = f"""🧾 *INVOICE #{invoice_number}*
-    📅 Date: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+    # Create formatted invoice text (Arabic version)
+    invoice_text = f"""شكراً لزيارتكم معرض القرطاسية الثّالث 🖊️📚
 
-    👤 *BILL TO*
+    🧾 *فاتورة رقم {invoice_number}*
+    📅 التاريخ: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+
+    👤 *العميل*
     ━━━━━━━━━━━━━━━━━━
-    📋 Name: {customer['name']}
-    📞 Phone: {customer['phone']}"""
+    📋 الاسم: {customer['name']}
+    📞 الهاتف: {customer['phone']}"""
 
     if customer.get('email'):
-        invoice_text += f"\n📧 Email: {customer['email']}"
+        invoice_text += f"\n📧 البريد الإلكتروني: {customer['email']}"
 
     if customer.get('address'):
-        invoice_text += f"\n📍 Address: {customer['address']}"
+        invoice_text += f"\n📍 العنوان: {customer['address']}"
 
-    invoice_text += "\n\n📦 *ITEMS*\n━━━━━━━━━━━━━━━━━━\n"
+    invoice_text += "\n\n📦 *المشتريات*\n━━━━━━━━━━━━━━━━━━\n"
 
     for i, item in enumerate(cart_items, 1):
         item_total = item['quantity'] * item['price']
         invoice_text += f"{i}. {item['product']}\n"
-        invoice_text += f"   ➝ Qty: {item['quantity']} × ${item['price']:.2f}\n"
-        invoice_text += f"   ➝ Subtotal: ${item_total:.2f}\n\n"
+        invoice_text += f"   ➝ الكمية: {item['quantity']} × ${item['price']:.2f}\n"
+        invoice_text += f"   ➝ المجموع الفرعي: ${item_total:.2f}\n\n"
 
     invoice_text += "━━━━━━━━━━━━━━━━━━\n"
-    invoice_text += f"💰 *TOTAL: ${total_amount:.2f}*\n"
+    invoice_text += f"💰 *الإجمالي: ${total_amount:.2f}*\n"
     invoice_text += "━━━━━━━━━━━━━━━━━━\n\n"
-    invoice_text += f"💰 *PAID: ${Paid:.2f}*\n"
-    
+    invoice_text += f"💰 *المدفوع: ${Paid:.2f}*\n"
+
     invoice_text += "━━━━━━━━━━━━━━━━━━\n\n"
+    invoice_text += f"🕒 تم توليد الفاتورة بتاريخ {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
 
-    invoice_text += f"🕒 Generated on {datetime.now().strftime('%Y-%m-%d at %H:%M')}"
-
+    invoice_text += """دمتم بخير،
+    الكشاف المسلم - فوج البراء بن مالك"""
     return invoice_text, total_amount
 
 # Create WhatsApp link with formatted invoice text
