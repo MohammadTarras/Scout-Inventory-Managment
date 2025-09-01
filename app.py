@@ -19,7 +19,7 @@ st.set_page_config(
 # Admin credentials
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
-
+st.image("logo.jpg", width=150)
 # Initialize session state
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
