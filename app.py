@@ -8,6 +8,7 @@ import hashlib
 import plotly.express as px
 import plotly.graph_objects as go
 from collections import defaultdict
+from zoneinfo import ZoneInfo
 
 # Set page config
 st.set_page_config(
@@ -245,8 +246,8 @@ def save_invoice_record(customer, cart_items, invoice_number, total_amount, paid
         'paid_amount': paid_amount,
         'unpaid_amount': unpaid_amount,
         'status': status,
-        'date': datetime.now().isoformat(),
-        'billing_date': datetime.now().isoformat(),
+        'date': datetime.now(ZoneInfo("Asia/Beirut")).isoformat(),
+        'billing_date': datetime.now(ZoneInfo("Asia/Beirut")).isoformat(),
         'created_by': st.session_state.current_user,
         'salesman': st.session_state.current_user
     }
@@ -300,7 +301,7 @@ def admin_panel():
                                 'password': hash_password(new_password),
                                 'role': new_role,
                                 'name': new_name,
-                                'created_date': datetime.now().isoformat(),
+                                'created_date': datetime.now(ZoneInfo("Asia/Beirut")).isoformat(),
                                 'active': True
                             }
                             st.session_state.salesmen.append(new_salesman)
