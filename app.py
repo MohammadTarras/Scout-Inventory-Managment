@@ -3,10 +3,7 @@ import pandas as pd
 import json
 from datetime import datetime, timedelta
 import os
-from fpdf import FPDF
 import urllib.parse
-import tempfile
-import shutil
 import hashlib
 import plotly.express as px
 import plotly.graph_objects as go
@@ -157,6 +154,73 @@ def load_products():
             return False
     return False
 
+# Import data function
+def import_billing_data():
+    """Import customers and invoices from the provided billing data"""
+    
+    # Sample data structure based on the provided information
+    billing_data = []
+    
+    imported_customers = 0
+    imported_invoices = 0
+    
+    # Create unique customers dictionary to avoid duplicates
+    unique_customers = {}
+    
+    # Process each billing record
+    for i, record in enumerate(billing_data):
+        # Create or update customer
+        customer_key = f"{record['name']}_{record['phone']}"
+        
+        if customer_key not in unique_customers:
+            customer = {
+                'id': len(st.session_state.customers) + len(unique_customers) + 1,
+                'name': record['name'],
+                'phone': record['phone'],
+                'email': '',
+                'address': '',
+                'created_date': datetime.now().isoformat(),
+                'created_by': 'imported_data'
+            }
+            unique_customers[customer_key] = customer
+            imported_customers += 1
+        
+        # Create invoice
+        invoice_date = datetime.strptime(record['date'], '%m/%d/%Y')
+        invoice_number = f"IMP-{invoice_date.strftime('%Y%m%d')}-{i+1:03d}"
+        
+        invoice = {
+            'invoice_number': invoice_number,
+            'customer': unique_customers[customer_key],
+            'items': [
+                {
+                    'product': 'Imported Service/Product',
+                    'price': float(record['total']),
+                    'quantity': 1
+                }
+            ],
+            'total_amount': float(record['total']),
+            'paid_amount': float(record['paid']),
+            'unpaid_amount': float(record['unpaid']),
+            'status': record['status'],
+            'date': invoice_date.isoformat(),
+            'billing_date': datetime.strptime(record['billing_date'], '%m/%d/%Y').isoformat(),
+            'created_by': 'imported_data',
+            'salesman': 'imported_data'
+        }
+        
+        st.session_state.invoices.append(invoice)
+        imported_invoices += 1
+    
+    # Add unique customers to the customers list
+    st.session_state.customers.extend(unique_customers.values())
+    
+    # Save data
+    save_customers()
+    save_invoices()
+    
+    return imported_customers, imported_invoices
+
 # Generate WhatsApp formatted invoice text
 def generate_whatsapp_invoice_text(customer, cart_items, invoice_number):
     total_amount = sum(item['quantity'] * item['price'] for item in cart_items)
@@ -191,70 +255,6 @@ def generate_whatsapp_invoice_text(customer, cart_items, invoice_number):
     
     return invoice_text, total_amount
 
-# Generate PDF invoice
-def generate_pdf_invoice(customer, cart_items, invoice_number):
-    class PDF(FPDF):
-        def header(self):
-            self.set_font('Arial', 'B', 15)
-            self.cell(0, 10, 'INVOICE', 0, 1, 'C')
-            self.ln(10)
-        
-        def footer(self):
-            self.set_y(-15)
-            self.set_font('Arial', 'I', 8)
-            self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
-    
-    pdf = PDF()
-    pdf.add_page()
-    
-    # Invoice header
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, f'Invoice #: {invoice_number}', 0, 1)
-    pdf.cell(0, 10, f'Date: {datetime.now().strftime("%Y-%m-%d %H:%M")}', 0, 1)
-    pdf.ln(10)
-    
-    # Customer details
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, 'Bill To:', 0, 1)
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 10, f'Name: {customer["name"]}', 0, 1)
-    pdf.cell(0, 10, f'Phone: {customer["phone"]}', 0, 1)
-    if customer.get('email'):
-        pdf.cell(0, 10, f'Email: {customer["email"]}', 0, 1)
-    if customer.get('address'):
-        pdf.cell(0, 10, f'Address: {customer["address"]}', 0, 1)
-    pdf.ln(10)
-    
-    # Items header
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(80, 10, 'Product', 1, 0, 'C')
-    pdf.cell(30, 10, 'Quantity', 1, 0, 'C')
-    pdf.cell(30, 10, 'Price', 1, 0, 'C')
-    pdf.cell(30, 10, 'Total', 1, 1, 'C')
-    
-    # Items
-    pdf.set_font('Arial', '', 10)
-    total_amount = 0
-    for item in cart_items:
-        item_total = item['quantity'] * item['price']
-        total_amount += item_total
-        pdf.cell(80, 10, item['product'][:30], 1, 0)
-        pdf.cell(30, 10, str(item['quantity']), 1, 0, 'C')
-        pdf.cell(30, 10, f"${item['price']:.2f}", 1, 0, 'C')
-        pdf.cell(30, 10, f"${item_total:.2f}", 1, 1, 'C')
-    
-    # Total
-    pdf.ln(5)
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(140, 10, 'TOTAL:', 1, 0, 'R')
-    pdf.cell(30, 10, f"${total_amount:.2f}", 1, 1, 'C')
-    
-    # Save PDF
-    os.makedirs("invoices", exist_ok=True)
-    pdf_path = f"invoices/invoice_{invoice_number}.pdf"
-    pdf.output(pdf_path)
-    return pdf_path, total_amount
-
 # Create WhatsApp link with formatted invoice text
 def create_whatsapp_link(phone, invoice_text):
     # Clean phone number (remove non-digits)
@@ -275,8 +275,11 @@ def save_invoice_record(customer, cart_items, invoice_number, total_amount):
         'customer': customer,
         'items': cart_items,
         'total_amount': total_amount,
+        'paid_amount': 0,
+        'unpaid_amount': total_amount,
+        'status': 'غير مدفوعة',
         'date': datetime.now().isoformat(),
-        'status': 'created',
+        'billing_date': datetime.now().isoformat(),
         'created_by': st.session_state.current_user,
         'salesman': st.session_state.current_user
     }
@@ -294,7 +297,7 @@ def admin_panel():
     load_invoices()
     
     # Admin tabs
-    admin_tab1, admin_tab2, admin_tab3 = st.tabs(["👥 Manage Salesmen", "📊 Sales Reports", "📈 Analytics"])
+    admin_tab1, admin_tab2, admin_tab3, admin_tab4 = st.tabs(["👥 Manage Salesmen", "📊 Sales Reports", "📈 Analytics", "📥 Import Data"])
     
     # Tab 1: Manage Salesmen
     with admin_tab1:
@@ -400,17 +403,32 @@ def admin_panel():
         if filtered_invoices:
             # Total sales summary
             total_sales = sum(inv['total_amount'] for inv in filtered_invoices)
+            total_paid = sum(inv.get('paid_amount', inv['total_amount']) for inv in filtered_invoices)
+            total_unpaid = sum(inv.get('unpaid_amount', 0) for inv in filtered_invoices)
             total_invoices = len(filtered_invoices)
             avg_sale = total_sales / total_invoices if total_invoices > 0 else 0
             
             # Display metrics
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Total Sales", f"${total_sales:.2f}")
             with col2:
-                st.metric("Total Invoices", total_invoices)
+                st.metric("Total Paid", f"${total_paid:.2f}")
             with col3:
+                st.metric("Total Unpaid", f"${total_unpaid:.2f}")
+            with col4:
                 st.metric("Average Sale", f"${avg_sale:.2f}")
+            
+            # Payment status breakdown
+            status_counts = defaultdict(int)
+            for invoice in filtered_invoices:
+                status_counts[invoice.get('status', 'غير مدفوعة')] += 1
+            
+            if status_counts:
+                st.subheader("Payment Status Breakdown")
+                df_status = pd.DataFrame(list(status_counts.items()), columns=['Status', 'Count'])
+                fig_status = px.pie(df_status, values='Count', names='Status', title='Invoice Payment Status')
+                st.plotly_chart(fig_status, use_container_width=True)
             
             # Sales by day
             st.subheader("Daily Sales")
@@ -429,10 +447,12 @@ def admin_panel():
             
             # Sales by salesman
             st.subheader("Sales by Salesman")
-            salesman_sales = defaultdict(lambda: {'total': 0, 'count': 0})
+            salesman_sales = defaultdict(lambda: {'total': 0, 'count': 0, 'paid': 0, 'unpaid': 0})
             for invoice in filtered_invoices:
                 salesman = invoice.get('salesman', invoice.get('created_by', 'Unknown'))
                 salesman_sales[salesman]['total'] += invoice['total_amount']
+                salesman_sales[salesman]['paid'] += invoice.get('paid_amount', invoice['total_amount'])
+                salesman_sales[salesman]['unpaid'] += invoice.get('unpaid_amount', 0)
                 salesman_sales[salesman]['count'] += 1
             
             if salesman_sales:
@@ -440,6 +460,8 @@ def admin_panel():
                     {
                         'Salesman': salesman,
                         'Total Sales': data['total'],
+                        'Total Paid': data['paid'],
+                        'Total Unpaid': data['unpaid'],
                         'Invoice Count': data['count'],
                         'Average Sale': data['total'] / data['count'] if data['count'] > 0 else 0
                     }
@@ -462,9 +484,13 @@ def admin_panel():
             df_invoices = pd.DataFrame([
                 {
                     'Invoice #': inv['invoice_number'],
-                    'Date': datetime.fromisoformat(inv['date']).strftime('%Y-%m-%d %H:%M'),
+                    'Date': datetime.fromisoformat(inv['date']).strftime('%Y-%m-%d'),
                     'Customer': inv['customer']['name'],
+                    'Phone': inv['customer']['phone'],
                     'Total': f"${inv['total_amount']:.2f}",
+                    'Paid': f"${inv.get('paid_amount', inv['total_amount']):.2f}",
+                    'Unpaid': f"${inv.get('unpaid_amount', 0):.2f}",
+                    'Status': inv.get('status', 'غير مدفوعة'),
                     'Salesman': inv.get('salesman', inv.get('created_by', 'Unknown'))
                 }
                 for inv in sorted(filtered_invoices, key=lambda x: x['date'], reverse=True)
@@ -481,11 +507,13 @@ def admin_panel():
         
         if st.session_state.invoices:
             # Top customers
-            customer_sales = defaultdict(lambda: {'total': 0, 'count': 0})
+            customer_sales = defaultdict(lambda: {'total': 0, 'count': 0, 'paid': 0, 'unpaid': 0})
             for invoice in st.session_state.invoices:
-                customer = invoice['customer']['name']
-                customer_sales[customer]['total'] += invoice['total_amount']
-                customer_sales[customer]['count'] += 1
+                customer_key = f"{invoice['customer']['name']} - {invoice['customer']['phone']}"
+                customer_sales[customer_key]['total'] += invoice['total_amount']
+                customer_sales[customer_key]['paid'] += invoice.get('paid_amount', invoice['total_amount'])
+                customer_sales[customer_key]['unpaid'] += invoice.get('unpaid_amount', 0)
+                customer_sales[customer_key]['count'] += 1
             
             # Top customers chart
             if customer_sales:
@@ -496,6 +524,8 @@ def admin_panel():
                     {
                         'Customer': customer,
                         'Total Sales': data['total'],
+                        'Total Paid': data['paid'],
+                        'Total Unpaid': data['unpaid'],
                         'Invoice Count': data['count']
                     }
                     for customer, data in top_customers
@@ -506,42 +536,78 @@ def admin_panel():
                                      title='Top Customers by Total Sales')
                 fig_customers.update_xaxes(tickangle=45)
                 st.plotly_chart(fig_customers, use_container_width=True)
+                
+                # Customer details table
+                st.dataframe(df_top_customers, use_container_width=True)
             
-            # Product analysis
-            product_sales = defaultdict(lambda: {'total': 0, 'quantity': 0})
-            for invoice in st.session_state.invoices:
-                for item in invoice['items']:
-                    product = item['product']
-                    product_sales[product]['total'] += item['price'] * item['quantity']
-                    product_sales[product]['quantity'] += item['quantity']
+            # Payment analysis
+            paid_invoices = [inv for inv in st.session_state.invoices if inv.get('status', '').startswith('مدفوعة')]
+            unpaid_invoices = [inv for inv in st.session_state.invoices if inv.get('status', '') == 'غير مدفوعة']
+            partial_invoices = [inv for inv in st.session_state.invoices if 'جزئياً' in inv.get('status', '')]
             
-            if product_sales:
-                top_products = sorted(product_sales.items(), 
-                                    key=lambda x: x[1]['total'], reverse=True)[:10]
-                
-                df_top_products = pd.DataFrame([
-                    {
-                        'Product': product,
-                        'Total Sales': data['total'],
-                        'Quantity Sold': data['quantity']
-                    }
-                    for product, data in top_products
-                ])
-                
-                st.subheader("Top 10 Products by Sales")
-                fig_products = px.bar(df_top_products, x='Product', y='Total Sales',
-                                    title='Top Products by Total Sales')
-                fig_products.update_xaxes(tickangle=45)
-                st.plotly_chart(fig_products, use_container_width=True)
-                
-                # Product quantity chart
-                fig_quantity = px.bar(df_top_products, x='Product', y='Quantity Sold',
-                                    title='Top Products by Quantity Sold')
-                fig_quantity.update_xaxes(tickangle=45)
-                st.plotly_chart(fig_quantity, use_container_width=True)
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Fully Paid Invoices", len(paid_invoices))
+            with col2:
+                st.metric("Unpaid Invoices", len(unpaid_invoices))
+            with col3:
+                st.metric("Partially Paid Invoices", len(partial_invoices))
         
         else:
             st.info("No sales data available for analytics")
+    
+    # Tab 4: Import Data
+    with admin_tab4:
+        st.header("📥 Import Billing Data")
+        
+        st.info("This will import the customer and invoice data from your billing system.")
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.subheader("Import Summary")
+            st.write("The system will import:")
+            st.write("• Customer information (name, phone)")
+            st.write("• Invoice records with payment status")
+            st.write("• Payment amounts and outstanding balances")
+            
+        with col2:
+            st.subheader("Current Data")
+            st.metric("Existing Customers", len(st.session_state.customers))
+            st.metric("Existing Invoices", len(st.session_state.invoices))
+        
+        if st.button("🚀 Import Billing Data", type="primary"):
+            try:
+                with st.spinner("Importing data..."):
+                    imported_customers, imported_invoices = import_billing_data()
+                
+                st.success(f"✅ Import completed successfully!")
+                st.write(f"• Imported {imported_customers} unique customers")
+                st.write(f"• Imported {imported_invoices} invoices")
+                
+                # Show summary
+                total_imported_sales = sum(inv['total_amount'] for inv in st.session_state.invoices 
+                                         if inv.get('created_by') == 'imported_data')
+                total_paid = sum(inv.get('paid_amount', 0) for inv in st.session_state.invoices 
+                               if inv.get('created_by') == 'imported_data')
+                total_unpaid = sum(inv.get('unpaid_amount', 0) for inv in st.session_state.invoices 
+                                 if inv.get('created_by') == 'imported_data')
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Imported Sales", f"${total_imported_sales:.2f}")
+                with col2:
+                    st.metric("Total Paid", f"${total_paid:.2f}")
+                with col3:
+                    st.metric("Total Outstanding", f"${total_unpaid:.2f}")
+                
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"Error importing data: {str(e)}")
+        
+        # Warning about duplicate imports
+        st.warning("⚠️ Warning: Running the import multiple times will create duplicate records. Only run this once unless you want to reset the data.")
 
 # Main app logic
 def main_app():
@@ -632,7 +698,19 @@ def main_app():
             if st.session_state.customers:
                 st.header("Existing Customers")
                 df_customers = pd.DataFrame(st.session_state.customers)
-                st.dataframe(df_customers[['name', 'phone', 'email']], use_container_width=True)
+                # Display with search functionality
+                search_term = st.text_input("🔍 Search customers", placeholder="Search by name or phone...")
+                
+                if search_term:
+                    filtered_customers = [c for c in st.session_state.customers 
+                                        if search_term.lower() in c['name'].lower() or 
+                                           search_term in c['phone']]
+                    df_customers = pd.DataFrame(filtered_customers)
+                
+                if not df_customers.empty:
+                    st.dataframe(df_customers[['name', 'phone', 'email']], use_container_width=True)
+                else:
+                    st.info("No customers found matching your search.")
         
         # Tab 2: Create Invoice
         with tab2:
@@ -660,124 +738,124 @@ def main_app():
             elif not st.session_state.customers:
                 st.warning("Please add at least one customer first.")
             else:
-                # Select customer
-                customer_options = [f"{c['name']} - {c['phone']}" for c in st.session_state.customers]
-                selected_customer_idx = st.selectbox("Select Customer", range(len(customer_options)), 
-                                                   format_func=lambda x: customer_options[x])
-                selected_customer = st.session_state.customers[selected_customer_idx]
+                # Select customer with search
+                st.subheader("Select Customer")
+                customer_search = st.text_input("🔍 Search customer", placeholder="Type name or phone...")
                 
-                st.info(f"Creating invoice for: {selected_customer['name']} ({selected_customer['phone']})")
+                if customer_search:
+                    filtered_customers = [c for c in st.session_state.customers 
+                                        if customer_search.lower() in c['name'].lower() or 
+                                           customer_search in c['phone']]
+                else:
+                    filtered_customers = st.session_state.customers
                 
-                # Product selection
-                st.subheader("Add Products to Invoice")
-                
-                col1, col2, col3 = st.columns([3, 1, 1])
-                
-                with col1:
-                    product_options = st.session_state.products['product'].tolist()
-                    selected_product = st.selectbox("Select Product", product_options)
-                
-                with col2:
-                    quantity = st.number_input("Quantity", min_value=1, value=1)
-                
-                with col3:
-                    if st.button("Add to Cart"):
-                        product_info = st.session_state.products[st.session_state.products['product'] == selected_product].iloc[0]
-                        cart_item = {
-                            'product': selected_product,
-                            'price': float(product_info['price']),
-                            'quantity': quantity
-                        }
-                        st.session_state.cart.append(cart_item)
-                        st.success(f"Added {quantity}x {selected_product} to cart")
-                        st.rerun()
-                
-                # Display cart
-                if st.session_state.cart:
-                    st.subheader("Invoice Items")
+                if filtered_customers:
+                    customer_options = [f"{c['name']} - {c['phone']}" for c in filtered_customers]
+                    selected_customer_idx = st.selectbox("Select Customer", range(len(customer_options)), 
+                                                       format_func=lambda x: customer_options[x])
+                    selected_customer = filtered_customers[selected_customer_idx]
                     
-                    # Display cart with remove option
-                    for i, item in enumerate(st.session_state.cart):
-                        col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 1])
-                        
-                        with col1:
-                            st.text(item['product'])
-                        with col2:
-                            st.text(f"${item['price']:.2f}")
-                        with col3:
-                            st.text(str(item['quantity']))
-                        with col4:
-                            st.text(f"${item['price'] * item['quantity']:.2f}")
-                        with col5:
-                            if st.button("Remove", key=f"remove_{i}"):
-                                st.session_state.cart.pop(i)
-                                st.rerun()
+                    st.info(f"Creating invoice for: {selected_customer['name']} ({selected_customer['phone']})")
                     
-                    # Total
-                    total_amount = sum(item['price'] * item['quantity'] for item in st.session_state.cart)
-                    st.subheader(f"Total: ${total_amount:.2f}")
+                    # Product selection
+                    st.subheader("Add Products to Invoice")
                     
-                    # Generate invoice
-                    col1, col2 = st.columns(2)
+                    col1, col2, col3 = st.columns([3, 1, 1])
                     
                     with col1:
-                        if st.button("🧾 Create Invoice", type="primary"):
-                            invoice_number = f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                            
-                            try:
-                                # Generate WhatsApp formatted invoice text
-                                invoice_text, amount = generate_whatsapp_invoice_text(selected_customer, st.session_state.cart, invoice_number)
-                                
-                                # Generate PDF invoice
-                                pdf_path, _ = generate_pdf_invoice(selected_customer, st.session_state.cart, invoice_number)
-                                
-                                # Save invoice record
-                                invoice_record = save_invoice_record(selected_customer, st.session_state.cart, invoice_number, amount)
-                                
-                                st.success(f"✅ Invoice {invoice_number} created successfully!")
-                                
-                                # Display invoice text
-                                with st.expander("📄 Invoice Text Preview", expanded=True):
-                                    st.text(invoice_text)
-                                
-                                # WhatsApp sharing
-                                st.markdown("### 📱 Send Invoice via WhatsApp")
-                                
-                                whatsapp_link = create_whatsapp_link(selected_customer['phone'], invoice_text)
-                                
-                                col_wa, col_pdf = st.columns(2)
-                                
-                                with col_wa:
-                                    st.markdown(f"**[📱 Send via WhatsApp]({whatsapp_link})**")
-                                    st.caption("Click to open WhatsApp with the formatted invoice")
-                                
-                                with col_pdf:
-                                    # Download PDF
-                                    with open(pdf_path, "rb") as pdf_file:
-                                        pdf_bytes = pdf_file.read()
-                                        st.download_button(
-                                            label="📥 Download PDF",
-                                            data=pdf_bytes,
-                                            file_name=f"invoice_{invoice_number}.pdf",
-                                            mime="application/pdf"
-                                        )
-                                
-                               
-                                # Clear cart option
-                                if st.button("🗑️ Clear Cart & Create New Invoice"):
-                                    st.session_state.cart = []
-                                    st.rerun()
-                                    
-                            except Exception as e:
-                                st.error(f"Error creating invoice: {str(e)}")
+                        product_options = st.session_state.products['product'].tolist()
+                        selected_product = st.selectbox("Select Product", product_options)
                     
                     with col2:
-                        if st.button("🗑️ Clear Cart"):
-                            st.session_state.cart = []
+                        quantity = st.number_input("Quantity", min_value=1, value=1)
+                    
+                    with col3:
+                        if st.button("Add to Cart"):
+                            product_info = st.session_state.products[st.session_state.products['product'] == selected_product].iloc[0]
+                            cart_item = {
+                                'product': selected_product,
+                                'price': float(product_info['price']),
+                                'quantity': quantity
+                            }
+                            st.session_state.cart.append(cart_item)
+                            st.success(f"Added {quantity}x {selected_product} to cart")
                             st.rerun()
-                
+                    
+                    # Display cart
+                    if st.session_state.cart:
+                        st.subheader("Invoice Items")
+                        
+                        # Display cart with remove option
+                        for i, item in enumerate(st.session_state.cart):
+                            col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 1])
+                            
+                            with col1:
+                                st.text(item['product'])
+                            with col2:
+                                st.text(f"${item['price']:.2f}")
+                            with col3:
+                                st.text(str(item['quantity']))
+                            with col4:
+                                st.text(f"${item['price'] * item['quantity']:.2f}")
+                            with col5:
+                                if st.button("Remove", key=f"remove_{i}"):
+                                    st.session_state.cart.pop(i)
+                                    st.rerun()
+                        
+                        # Total
+                        total_amount = sum(item['price'] * item['quantity'] for item in st.session_state.cart)
+                        st.subheader(f"Total: ${total_amount:.2f}")
+                        
+                        # Generate invoice
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if st.button("🧾 Create Invoice", type="primary"):
+                                invoice_number = f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                                
+                                try:
+                                    # Generate WhatsApp formatted invoice text
+                                    invoice_text, amount = generate_whatsapp_invoice_text(selected_customer, st.session_state.cart, invoice_number)
+                                    
+                                    # Save invoice record
+                                    invoice_record = save_invoice_record(selected_customer, st.session_state.cart, invoice_number, amount)
+                                    
+                                    st.success(f"✅ Invoice {invoice_number} created successfully!")
+                                    
+                                    # Display invoice text
+                                    with st.expander("📄 Invoice Text Preview", expanded=True):
+                                        st.text(invoice_text)
+                                    
+                                    # WhatsApp sharing
+                                    st.markdown("### 📱 Send Invoice via WhatsApp")
+                                    
+                                    whatsapp_link = create_whatsapp_link(selected_customer['phone'], invoice_text)
+                                    
+                                    st.markdown(f"**[📱 Send via WhatsApp]({whatsapp_link})**")
+                                    st.caption("Click to open WhatsApp with the formatted invoice")
+                                    
+                                    # Copy text to clipboard
+                                    st.markdown("### 📋 Copy Invoice Text")
+                                    st.code(invoice_text, language=None)
+                                    st.caption("You can copy the text above and paste it manually in WhatsApp or any messaging app")
+                                    
+                                    # Clear cart option
+                                    if st.button("🗑️ Clear Cart & Create New Invoice"):
+                                        st.session_state.cart = []
+                                        st.rerun()
+                                        
+                                except Exception as e:
+                                    st.error(f"Error creating invoice: {str(e)}")
+                        
+                        with col2:
+                            if st.button("🗑️ Clear Cart"):
+                                st.session_state.cart = []
+                                st.rerun()
+                    
+                    else:
+                        st.info("Cart is empty. Add some products to create an invoice.")
                 else:
-                    st.info("Cart is empty. Add some products to create an invoice.")
+                    st.info("No customers found. Please add customers first.")
         
         # Tab 3: Invoice History
         with tab3:
@@ -794,18 +872,46 @@ def main_app():
             if display_invoices:
                 # Summary for current user/all
                 total_sales = sum(inv['total_amount'] for inv in display_invoices)
+                total_paid = sum(inv.get('paid_amount', inv['total_amount']) for inv in display_invoices)
+                total_unpaid = sum(inv.get('unpaid_amount', 0) for inv in display_invoices)
                 total_count = len(display_invoices)
                 
-                col1, col2 = st.columns(2)
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("Total Sales", f"${total_sales:.2f}")
                 with col2:
+                    st.metric("Total Paid", f"${total_paid:.2f}")
+                with col3:
+                    st.metric("Total Unpaid", f"${total_unpaid:.2f}")
+                with col4:
                     st.metric("Total Invoices", total_count)
                 
                 st.divider()
                 
-                for invoice in reversed(display_invoices):  # Show newest first
-                    with st.expander(f"Invoice {invoice['invoice_number']} - {invoice['customer']['name']} - ${invoice['total_amount']:.2f}"):
+                # Filter options
+                col1, col2 = st.columns(2)
+                with col1:
+                    status_filter = st.selectbox("Filter by Status", 
+                                               ["All", "مدفوعة", "غير مدفوعة", "مدفوعة جزئياً"])
+                with col2:
+                    search_invoice = st.text_input("🔍 Search invoices", 
+                                                 placeholder="Search by customer name or invoice number...")
+                
+                # Apply filters
+                filtered_display = display_invoices
+                if status_filter != "All":
+                    filtered_display = [inv for inv in filtered_display 
+                                      if status_filter in inv.get('status', '')]
+                
+                if search_invoice:
+                    filtered_display = [inv for inv in filtered_display 
+                                      if search_invoice.lower() in inv['customer']['name'].lower() or 
+                                         search_invoice.lower() in inv['invoice_number'].lower()]
+                
+                for invoice in reversed(filtered_display):  # Show newest first
+                    status_icon = "✅" if invoice.get('status', '').startswith('مدفوعة') else "❌" if invoice.get('status') == 'غير مدفوعة' else "⚠️"
+                    
+                    with st.expander(f"{status_icon} Invoice {invoice['invoice_number']} - {invoice['customer']['name']} - ${invoice['total_amount']:.2f}"):
                         col1, col2 = st.columns(2)
                         
                         with col1:
@@ -813,6 +919,9 @@ def main_app():
                             st.write(f"**Phone:** {invoice['customer']['phone']}")
                             st.write(f"**Date:** {datetime.fromisoformat(invoice['date']).strftime('%Y-%m-%d %H:%M')}")
                             st.write(f"**Total:** ${invoice['total_amount']:.2f}")
+                            st.write(f"**Paid:** ${invoice.get('paid_amount', invoice['total_amount']):.2f}")
+                            st.write(f"**Unpaid:** ${invoice.get('unpaid_amount', 0):.2f}")
+                            st.write(f"**Status:** {invoice.get('status', 'غير مدفوعة')}")
                             if st.session_state.user_role == 'admin':
                                 st.write(f"**Salesman:** {invoice.get('salesman', invoice.get('created_by', 'Unknown'))}")
                         
