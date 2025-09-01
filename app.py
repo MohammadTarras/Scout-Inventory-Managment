@@ -208,8 +208,7 @@ def create_whatsapp_link(phone, invoice_text):
     encoded_message = urllib.parse.quote(invoice_text)
     
     # Create WhatsApp link
-    whatsapp_url  = f"whatsapp://send?phone={clean_phone}&text={encoded_message}"
-
+    whatsapp_url = f"https://wa.me/{clean_phone}?text={encoded_message}"
     
     return whatsapp_url
 
