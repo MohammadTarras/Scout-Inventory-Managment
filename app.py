@@ -163,23 +163,23 @@ def generate_whatsapp_invoice_text(customer, cart_items, invoice_number, Paid):
     total_amount = sum(item['quantity'] * item['price'] for item in cart_items)
     
     # Create formatted invoice text (Arabic version)
-    invoice_text = f"""شكراً لزيارتكم معرض القرطاسية الثّالث 🖊️📚
+    invoice_text = f"""شكراً لزيارتكم معرض القرطاسية الثّالث
 
-    🧾 *فاتورة رقم {invoice_number}*
-    📅 التاريخ: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+    *فاتورة رقم {invoice_number}*
+    التاريخ: {datetime.now().strftime("%Y-%m-%d %H:%M")}
 
-    👤 *العميل*
+    *العميل*
     ━━━━━━━━━━━━━━━━━━
-    📋 الاسم: {customer['name']}
-    📞 الهاتف: {customer['phone']}"""
+    الاسم: {customer['name']}
+    الهاتف: {customer['phone']}"""
 
     if customer.get('email'):
-        invoice_text += f"\n📧 البريد الإلكتروني: {customer['email']}"
+        invoice_text += f"\nالبريد الإلكتروني: {customer['email']}"
 
     if customer.get('address'):
-        invoice_text += f"\n📍 العنوان: {customer['address']}"
+        invoice_text += f"\nالعنوان: {customer['address']}"
 
-    invoice_text += "\n\n📦 *المشتريات*\n━━━━━━━━━━━━━━━━━━\n"
+    invoice_text += "\n\n*المشتريات*\n━━━━━━━━━━━━━━━━━━\n"
 
     for i, item in enumerate(cart_items, 1):
         item_total = item['quantity'] * item['price']
@@ -188,12 +188,12 @@ def generate_whatsapp_invoice_text(customer, cart_items, invoice_number, Paid):
         invoice_text += f"   ➝ المجموع الفرعي: ${item_total:.2f}\n\n"
 
     invoice_text += "━━━━━━━━━━━━━━━━━━\n"
-    invoice_text += f"💰 *الإجمالي: ${total_amount:.2f}*\n"
+    invoice_text += f"*الإجمالي: ${total_amount:.2f}*\n"
     invoice_text += "━━━━━━━━━━━━━━━━━━\n\n"
-    invoice_text += f"💰 *المدفوع: ${Paid:.2f}*\n"
+    invoice_text += f"*المدفوع: ${Paid:.2f}*\n"
 
     invoice_text += "━━━━━━━━━━━━━━━━━━\n\n"
-    invoice_text += f"🕒 تم توليد الفاتورة بتاريخ {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+    invoice_text += f"الفاتورة بتاريخ {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
 
     invoice_text += """دمتم بخير،
     الكشاف المسلم - فوج البراء بن مالك"""
