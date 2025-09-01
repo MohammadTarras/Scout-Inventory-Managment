@@ -886,7 +886,8 @@ def main_app():
                                     invoice_text, _ = generate_whatsapp_invoice_text(
                                         invoice['customer'], 
                                         invoice['items'], 
-                                        invoice['invoice_number']
+                                        invoice['invoice_number'],
+                                        invoice['paid_amount']
                                     )
                                     whatsapp_link = create_whatsapp_link(invoice['customer']['phone'], invoice_text)
                                     st.markdown(f"[📱 Open WhatsApp]({whatsapp_link})")
