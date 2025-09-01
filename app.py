@@ -20,6 +20,7 @@ st.set_page_config(
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
 st.image("logo.jpg", width=150)
+
 # Initialize session state
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
@@ -44,6 +45,9 @@ if 'invoices' not in st.session_state:
 
 if 'salesmen' not in st.session_state:
     st.session_state.salesmen = []
+
+if 'show_payment_popup' not in st.session_state:
+    st.session_state.show_payment_popup = False
 
 # Hash password function
 def hash_password(password):
@@ -154,73 +158,6 @@ def load_products():
             return False
     return False
 
-# Import data function
-def import_billing_data():
-    """Import customers and invoices from the provided billing data"""
-    
-    # Sample data structure based on the provided information
-    billing_data = []
-    
-    imported_customers = 0
-    imported_invoices = 0
-    
-    # Create unique customers dictionary to avoid duplicates
-    unique_customers = {}
-    
-    # Process each billing record
-    for i, record in enumerate(billing_data):
-        # Create or update customer
-        customer_key = f"{record['name']}_{record['phone']}"
-        
-        if customer_key not in unique_customers:
-            customer = {
-                'id': len(st.session_state.customers) + len(unique_customers) + 1,
-                'name': record['name'],
-                'phone': record['phone'],
-                'email': '',
-                'address': '',
-                'created_date': datetime.now().isoformat(),
-                'created_by': 'imported_data'
-            }
-            unique_customers[customer_key] = customer
-            imported_customers += 1
-        
-        # Create invoice
-        invoice_date = datetime.strptime(record['date'], '%m/%d/%Y')
-        invoice_number = f"IMP-{invoice_date.strftime('%Y%m%d')}-{i+1:03d}"
-        
-        invoice = {
-            'invoice_number': invoice_number,
-            'customer': unique_customers[customer_key],
-            'items': [
-                {
-                    'product': 'Imported Service/Product',
-                    'price': float(record['total']),
-                    'quantity': 1
-                }
-            ],
-            'total_amount': float(record['total']),
-            'paid_amount': float(record['paid']),
-            'unpaid_amount': float(record['unpaid']),
-            'status': record['status'],
-            'date': invoice_date.isoformat(),
-            'billing_date': datetime.strptime(record['billing_date'], '%m/%d/%Y').isoformat(),
-            'created_by': 'imported_data',
-            'salesman': 'imported_data'
-        }
-        
-        st.session_state.invoices.append(invoice)
-        imported_invoices += 1
-    
-    # Add unique customers to the customers list
-    st.session_state.customers.extend(unique_customers.values())
-    
-    # Save data
-    save_customers()
-    save_invoices()
-    
-    return imported_customers, imported_invoices
-
 # Generate WhatsApp formatted invoice text
 def generate_whatsapp_invoice_text(customer, cart_items, invoice_number):
     total_amount = sum(item['quantity'] * item['price'] for item in cart_items)
@@ -268,16 +205,39 @@ def create_whatsapp_link(phone, invoice_text):
     
     return whatsapp_url
 
+def delete_invoice(invoice_number):
+    """Delete an invoice from the records"""
+    original_count = len(st.session_state.invoices)
+    st.session_state.invoices = [inv for inv in st.session_state.invoices 
+                                if inv['invoice_number'] != invoice_number]
+    save_invoices()
+    return len(st.session_state.invoices) < original_count
+
+def determine_payment_status(total_amount, paid_amount):
+    """Determine payment status based on amounts"""
+    if paid_amount >= total_amount:
+        return "مدفوعة"
+    elif paid_amount > 0:
+        return "مدفوعة جزئياً"
+    else:
+        return "غير مدفوعة"
+
 # Save invoice record
-def save_invoice_record(customer, cart_items, invoice_number, total_amount):
+def save_invoice_record(customer, cart_items, invoice_number, total_amount, paid_amount=None):
+    if paid_amount is None:
+        paid_amount = total_amount
+    
+    unpaid_amount = max(0, total_amount - paid_amount)
+    status = determine_payment_status(total_amount, paid_amount)
+    
     invoice_record = {
         'invoice_number': invoice_number,
         'customer': customer,
         'items': cart_items,
         'total_amount': total_amount,
-        'paid_amount': 0,
-        'unpaid_amount': total_amount,
-        'status': 'غير مدفوعة',
+        'paid_amount': paid_amount,
+        'unpaid_amount': unpaid_amount,
+        'status': status,
         'date': datetime.now().isoformat(),
         'billing_date': datetime.now().isoformat(),
         'created_by': st.session_state.current_user,
@@ -555,59 +515,6 @@ def admin_panel():
         
         else:
             st.info("No sales data available for analytics")
-    
-    # Tab 4: Import Data
-    with admin_tab4:
-        st.header("📥 Import Billing Data")
-        
-        st.info("This will import the customer and invoice data from your billing system.")
-        
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            st.subheader("Import Summary")
-            st.write("The system will import:")
-            st.write("• Customer information (name, phone)")
-            st.write("• Invoice records with payment status")
-            st.write("• Payment amounts and outstanding balances")
-            
-        with col2:
-            st.subheader("Current Data")
-            st.metric("Existing Customers", len(st.session_state.customers))
-            st.metric("Existing Invoices", len(st.session_state.invoices))
-        
-        if st.button("🚀 Import Billing Data", type="primary"):
-            try:
-                with st.spinner("Importing data..."):
-                    imported_customers, imported_invoices = import_billing_data()
-                
-                st.success(f"✅ Import completed successfully!")
-                st.write(f"• Imported {imported_customers} unique customers")
-                st.write(f"• Imported {imported_invoices} invoices")
-                
-                # Show summary
-                total_imported_sales = sum(inv['total_amount'] for inv in st.session_state.invoices 
-                                         if inv.get('created_by') == 'imported_data')
-                total_paid = sum(inv.get('paid_amount', 0) for inv in st.session_state.invoices 
-                               if inv.get('created_by') == 'imported_data')
-                total_unpaid = sum(inv.get('unpaid_amount', 0) for inv in st.session_state.invoices 
-                                 if inv.get('created_by') == 'imported_data')
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Imported Sales", f"${total_imported_sales:.2f}")
-                with col2:
-                    st.metric("Total Paid", f"${total_paid:.2f}")
-                with col3:
-                    st.metric("Total Outstanding", f"${total_unpaid:.2f}")
-                
-                st.rerun()
-                
-            except Exception as e:
-                st.error(f"Error importing data: {str(e)}")
-        
-        # Warning about duplicate imports
-        st.warning("⚠️ Warning: Running the import multiple times will create duplicate records. Only run this once unless you want to reset the data.")
 
 # Main app logic
 def main_app():
@@ -811,46 +718,90 @@ def main_app():
                         
                         with col1:
                             if st.button("🧾 Create Invoice", type="primary"):
-                                invoice_number = f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                                
-                                try:
-                                    # Generate WhatsApp formatted invoice text
-                                    invoice_text, amount = generate_whatsapp_invoice_text(selected_customer, st.session_state.cart, invoice_number)
-                                    
-                                    # Save invoice record
-                                    invoice_record = save_invoice_record(selected_customer, st.session_state.cart, invoice_number, amount)
-                                    
-                                    st.success(f"✅ Invoice {invoice_number} created successfully!")
-                                    
-                                    # Display invoice text
-                                    with st.expander("📄 Invoice Text Preview", expanded=True):
-                                        st.text(invoice_text)
-                                    
-                                    # WhatsApp sharing
-                                    st.markdown("### 📱 Send Invoice via WhatsApp")
-                                    
-                                    whatsapp_link = create_whatsapp_link(selected_customer['phone'], invoice_text)
-                                    
-                                    st.markdown(f"**[📱 Send via WhatsApp]({whatsapp_link})**")
-                                    st.caption("Click to open WhatsApp with the formatted invoice")
-                                    
-                                    # Copy text to clipboard
-                                    st.markdown("### 📋 Copy Invoice Text")
-                                    st.code(invoice_text, language=None)
-                                    st.caption("You can copy the text above and paste it manually in WhatsApp or any messaging app")
-                                    
-                                    # Clear cart option
-                                    if st.button("🗑️ Clear Cart & Create New Invoice"):
-                                        st.session_state.cart = []
-                                        st.rerun()
-                                        
-                                except Exception as e:
-                                    st.error(f"Error creating invoice: {str(e)}")
-                        
+                                # Show payment popup
+                                st.session_state.show_payment_popup = True
+
                         with col2:
                             if st.button("🗑️ Clear Cart"):
                                 st.session_state.cart = []
                                 st.rerun()
+
+                        # Payment popup
+                        if st.session_state.get('show_payment_popup', False):
+                            with st.container():
+                                st.markdown("### 💰 Set Payment Amount")
+                                with st.form("payment_form"):
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        st.write(f"**Total Amount: ${total_amount:.2f}**")
+                                        paid_amount = st.number_input(
+                                            "Amount Paid", 
+                                            min_value=0.0, 
+                                            max_value=float(total_amount), 
+                                            value=float(total_amount),
+                                            step=0.01,
+                                            format="%.2f"
+                                        )
+                                    
+                                    with col2:
+                                        payment_status = determine_payment_status(total_amount, paid_amount)
+                                        st.write(f"**Status:** {payment_status}")
+                                        if paid_amount < total_amount:
+                                            st.write(f"**Remaining:** ${total_amount - paid_amount:.2f}")
+                                    
+                                    col_confirm, col_cancel = st.columns(2)
+                                    
+                                    with col_confirm:
+                                        confirm_create = st.form_submit_button("✅ Confirm & Create Invoice", type="primary")
+                                    
+                                    with col_cancel:
+                                        cancel_create = st.form_submit_button("❌ Cancel")
+                                    
+                                    if confirm_create:
+                                        invoice_number = f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                                        
+                                        try:
+                                            # Generate WhatsApp formatted invoice text
+                                            invoice_text, amount = generate_whatsapp_invoice_text(selected_customer, st.session_state.cart, invoice_number)
+                                            
+                                            # Save invoice record with payment info
+                                            invoice_record = save_invoice_record(selected_customer, st.session_state.cart, invoice_number, amount, paid_amount)
+                                            
+                                            st.success(f"✅ Invoice {invoice_number} created successfully!")
+                                            st.success(f"💰 Payment Status: {payment_status}")
+                                            
+                                            # Display invoice text
+                                            with st.expander("📄 Invoice Text Preview", expanded=True):
+                                                st.text(invoice_text)
+                                            
+                                            # WhatsApp sharing
+                                            st.markdown("### 📱 Send Invoice via WhatsApp")
+                                            
+                                            whatsapp_link = create_whatsapp_link(selected_customer['phone'], invoice_text)
+                                            
+                                            st.markdown(f"**[📱 Send via WhatsApp]({whatsapp_link})**")
+                                            st.caption("Click to open WhatsApp with the formatted invoice")
+                                            
+                                            # Copy text to clipboard
+                                            st.markdown("### 📋 Copy Invoice Text")
+                                            st.code(invoice_text, language=None)
+                                            st.caption("You can copy the text above and paste it manually in WhatsApp or any messaging app")
+                                            
+                                            # Clear session state
+                                            st.session_state.show_payment_popup = False
+                                            
+                                            # Clear cart option
+                                            if st.button("🗑️ Clear Cart & Create New Invoice"):
+                                                st.session_state.cart = []
+                                                st.rerun()
+                                                
+                                        except Exception as e:
+                                            st.error(f"Error creating invoice: {str(e)}")
+                                    
+                                    elif cancel_create:
+                                        st.session_state.show_payment_popup = False
+                                        st.rerun()
                     
                     else:
                         st.info("Cart is empty. Add some products to create an invoice.")
@@ -930,15 +881,52 @@ def main_app():
                             for item in invoice['items']:
                                 st.write(f"- {item['product']}: {item['quantity']} × ${item['price']:.2f} = ${item['quantity'] * item['price']:.2f}")
                         
-                        # Regenerate WhatsApp link
-                        if st.button(f"📱 Resend via WhatsApp", key=f"resend_{invoice['invoice_number']}"):
-                            invoice_text, _ = generate_whatsapp_invoice_text(
-                                invoice['customer'], 
-                                invoice['items'], 
-                                invoice['invoice_number']
-                            )
-                            whatsapp_link = create_whatsapp_link(invoice['customer']['phone'], invoice_text)
-                            st.markdown(f"[📱 Open WhatsApp]({whatsapp_link})")
+                        # Delete invoice button (Admin only or own invoices)
+                        can_delete = (st.session_state.user_role == 'admin' or 
+                                      invoice.get('created_by') == st.session_state.current_user or 
+                                      invoice.get('salesman') == st.session_state.current_user)
+
+                        if can_delete:
+                            col_resend, col_delete = st.columns(2)
+                            
+                            with col_resend:
+                                if st.button(f"📱 Resend via WhatsApp", key=f"resend_{invoice['invoice_number']}"):
+                                    invoice_text, _ = generate_whatsapp_invoice_text(
+                                        invoice['customer'], 
+                                        invoice['items'], 
+                                        invoice['invoice_number']
+                                    )
+                                    whatsapp_link = create_whatsapp_link(invoice['customer']['phone'], invoice_text)
+                                    st.markdown(f"[📱 Open WhatsApp]({whatsapp_link})")
+                            
+                            with col_delete:
+                                if st.button(f"🗑️ Delete Invoice", key=f"delete_{invoice['invoice_number']}", type="secondary"):
+                                    if st.session_state.get(f"confirm_delete_{invoice['invoice_number']}", False):
+                                        if delete_invoice(invoice['invoice_number']):
+                                            st.success(f"Invoice {invoice['invoice_number']} deleted successfully!")
+                                            # Clear confirmation state
+                                            if f"confirm_delete_{invoice['invoice_number']}" in st.session_state:
+                                                del st.session_state[f"confirm_delete_{invoice['invoice_number']}"]
+                                            st.rerun()
+                                        else:
+                                            st.error("Failed to delete invoice")
+                                    else:
+                                        st.session_state[f"confirm_delete_{invoice['invoice_number']}"] = True
+                                        st.rerun()
+                                
+                                # Show confirmation message
+                                if st.session_state.get(f"confirm_delete_{invoice['invoice_number']}", False):
+                                    st.warning("⚠️ Click Delete Invoice again to confirm deletion")
+                        else:
+                            # Original resend button for non-deletable invoices
+                            if st.button(f"📱 Resend via WhatsApp", key=f"resend_{invoice['invoice_number']}"):
+                                invoice_text, _ = generate_whatsapp_invoice_text(
+                                    invoice['customer'], 
+                                    invoice['items'], 
+                                    invoice['invoice_number']
+                                )
+                                whatsapp_link = create_whatsapp_link(invoice['customer']['phone'], invoice_text)
+                                st.markdown(f"[📱 Open WhatsApp]({whatsapp_link})")
             else:
                 if st.session_state.user_role == 'admin':
                     st.info("No invoices created yet.")
