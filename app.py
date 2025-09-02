@@ -1550,37 +1550,11 @@ def main_app():
         st.markdown("---")
         st.markdown("*Invoice Management System - Secure & Professional*")
 
-# Performance monitoring (optional)
-def display_performance_info():
-    """Display performance information for debugging"""
-    if st.session_state.user_role == 'admin' and st.sidebar.checkbox("Show Performance Info"):
-        st.sidebar.subheader("Performance Info")
-        
-        # Cache statistics
-        cache_size = len(st.session_state.data_cache)
-        st.sidebar.write(f"Cache entries: {cache_size}")
-        
-        # Session state size
-        session_size = len(st.session_state)
-        st.sidebar.write(f"Session state keys: {session_size}")
-        
-        # Cache keys
-        if cache_size > 0:
-            with st.sidebar.expander("Cache Keys"):
-                for key in st.session_state.data_cache.keys():
-                    age = time.time() - st.session_state.last_cache_update.get(key, 0)
-                    st.write(f"{key}: {age:.1f}s old")
-        
-        # Clear cache button
-        if st.sidebar.button("Clear All Cache"):
-            db.invalidate_cache()
-            st.cache_data.clear()
-            st.success("Cache cleared!")
+
 
 # Main application entry point
 if __name__ == "__main__":
     # Display performance info for admin users
-    display_performance_info()
     
     if not st.session_state.authenticated:
         login_page()
