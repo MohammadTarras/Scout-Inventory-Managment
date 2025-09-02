@@ -29,9 +29,10 @@ MAX_DISPLAY_ITEMS = 50
 @st.cache_resource
 def init_supabase():
     """Initialize Supabase client"""
-    SUPABASE_URL = 'https://jwuzkrrmbzglhigaabqj.supabase.co'
-    SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp3dXprcnJtYnpnbGhpZ2FhYnFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY3ODUzMjUsImV4cCI6MjA3MjM2MTMyNX0.aH6eHn6QsNr-laZ4NCPLocm-quGAfPAnyuqSHi8CDiw"
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+    
+    supabase_url = st.secrets["SUPABASE_URL"]
+    supabase_key = st.secrets["SUPABASE_KEY"]
+    return create_client(supabase_url, supabase_key)
 
 # Initialize Supabase client
 supabase: Client = init_supabase()
