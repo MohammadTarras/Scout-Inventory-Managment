@@ -1,0 +1,51 @@
+invoice_number,customer_id,total_amount,paid_amount,unpaid_amount,status,date,billing_date,created_by,salesman
+IMP-20250831-001,3,9.1,9.1,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-002,4,6.0,6.0,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-003,5,60.7,60.7,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-004,6,50.7,50.7,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-005,7,10.8,11.0,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-006,8,42.2,42.0,0.2,مدفوعة جزئياً,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-007,9,22.75,23.0,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-008,10,55.1,55.1,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-009,11,59.1,59.1,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-010,9,43.11,43.11,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-011,12,39.11,39.0,0.11,مدفوعة جزئياً,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-012,13,3.6,3.6,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-013,14,0.8,0.8,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-014,15,33.68,33.68,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-015,16,1.0,1.0,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-016,17,24.0,24.0,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-017,18,1.5,1.5,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-018,19,12.2,12.2,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-019,20,19.96,19.96,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-020,4,35.42,35.42,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-021,18,3.0,3.0,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-022,21,57.26,57.26,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-023,22,59.94,59.94,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-024,23,4.2,4.0,0.2,مدفوعة جزئياً,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-025,24,25.4,25.4,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-026,25,1.42,1.42,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-027,26,48.34,48.0,0.34,مدفوعة جزئياً,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-028,27,77.64,77.64,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-029,28,30.5,30.5,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-030,29,29.45,29.45,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-031,30,33.05,0.0,33.05,غير مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-032,25,1.42,1.42,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-033,31,57.35,57.35,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-034,32,31.0,31.0,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-035,33,81.55,81.55,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-036,34,61.9,62.0,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-037,35,30.7,30.7,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-038,36,33.54,33.54,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-039,37,22.0,22.0,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-040,38,42.7,43.0,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-041,39,4.68,4.68,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-042,40,8.82,8.82,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-043,41,66.9,51.0,15.9,مدفوعة جزئياً,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-044,42,41.74,42.0,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-045,43,4.0,4.0,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-046,44,5.6,5.6,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-047,45,73.98,73.98,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-048,46,25.55,25.55,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-049,47,2.9,2.9,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
+IMP-20250831-050,48,34.6,34.6,0.0,مدفوعة,2025-08-31,2025-08-31,imported_data,imported_data
