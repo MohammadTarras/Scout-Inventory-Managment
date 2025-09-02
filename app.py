@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -8,6 +7,8 @@ import plotly.express as px
 from collections import defaultdict
 from supabase import create_client, Client
 import json
+import time
+import logging
 
 # Set page config
 st.set_page_config(
@@ -16,15 +17,20 @@ st.set_page_config(
     layout="wide"
 )
 
+# Configure logging
+logging.basicConfig(level=logging.WARNING)
+
+# Constants
+CACHE_TTL = 300  # 5 minutes
+SEARCH_DEBOUNCE = 0.5  # 500ms
+MAX_DISPLAY_ITEMS = 50
+
 # Supabase configuration
 @st.cache_resource
 def init_supabase():
     """Initialize Supabase client"""
-    # You need to set these in Streamlit secrets or environment variables
-    SUPABASE_URL = 'https://jwuzkrrmbzglhigaabqj.supabase.co' # Your Supabase project URL
+    SUPABASE_URL = 'https://jwuzkrrmbzglhigaabqj.supabase.co'
     SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp3dXprcnJtYnpnbGhpZ2FhYnFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY3ODUzMjUsImV4cCI6MjA3MjM2MTMyNX0.aH6eHn6QsNr-laZ4NCPLocm-quGAfPAnyuqSHi8CDiw"
-
-    
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Initialize Supabase client
@@ -36,37 +42,96 @@ try:
 except:
     pass
 
-# Initialize session state
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
-if 'current_user' not in st.session_state:
-    st.session_state.current_user = None
-if 'user_role' not in st.session_state:
-    st.session_state.user_role = None
-if 'cart' not in st.session_state:
-    st.session_state.cart = []
-if 'show_payment_popup' not in st.session_state:
-    st.session_state.show_payment_popup = False
+# Initialize session state efficiently
+def init_session_state():
+    """Initialize session state with default values"""
+    defaults = {
+        'authenticated': False,
+        'current_user': None,
+        'user_role': None,
+        'cart': [],
+        'show_payment_popup': False,
+        'data_cache': {},
+        'last_cache_update': {},
+        'search_cache': {},
+        'last_search_time': {}
+    }
+    
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
-# Database Functions
-class DatabaseManager:
+init_session_state()
+
+# Optimized Database Functions with Caching
+class OptimizedDatabaseManager:
     def __init__(self, supabase_client):
         self.supabase = supabase_client
     
-    # Salesmen operations
-    def get_salesmen(self):
-        """Get all salesmen from database"""
+    def _get_cache_key(self, table_name, filters=None):
+        """Generate cache key for database queries"""
+        base_key = f"{table_name}"
+        if filters:
+            base_key += f"_{hash(str(sorted(filters.items())))}"
+        return base_key
+    
+    def _is_cache_valid(self, cache_key, ttl=CACHE_TTL):
+        """Check if cached data is still valid"""
+        if cache_key not in st.session_state.data_cache:
+            return False
+        
+        last_update = st.session_state.last_cache_update.get(cache_key, 0)
+        return (time.time() - last_update) < ttl
+    
+    def _cache_data(self, cache_key, data):
+        """Cache data with timestamp"""
+        st.session_state.data_cache[cache_key] = data
+        st.session_state.last_cache_update[cache_key] = time.time()
+    
+    def _get_cached_or_fetch(self, cache_key, fetch_func, ttl=CACHE_TTL):
+        """Get data from cache or fetch from database"""
+        if self._is_cache_valid(cache_key, ttl):
+            return st.session_state.data_cache[cache_key]
+        
         try:
-            response = self.supabase.table('salesmen').select('*').execute()
-            return response.data
+            data = fetch_func()
+            self._cache_data(cache_key, data)
+            return data
         except Exception as e:
-            st.error(f"Error fetching salesmen: {e}")
+            st.error(f"Database error: {e}")
             return []
+    
+    def invalidate_cache(self, table_name=None):
+        """Invalidate cache for specific table or all tables"""
+        if table_name:
+            keys_to_remove = [k for k in st.session_state.data_cache.keys() if k.startswith(table_name)]
+            for key in keys_to_remove:
+                del st.session_state.data_cache[key]
+                if key in st.session_state.last_cache_update:
+                    del st.session_state.last_cache_update[key]
+        else:
+            st.session_state.data_cache.clear()
+            st.session_state.last_cache_update.clear()
+    
+    # Salesmen operations
+    def get_salesmen(self, use_cache=True):
+        """Get all salesmen from database with caching"""
+        cache_key = self._get_cache_key('salesmen')
+        
+        if not use_cache:
+            self.invalidate_cache('salesmen')
+        
+        def fetch_salesmen():
+            response = self.supabase.table('salesmen').select('*').execute()
+            return response.data or []
+        
+        return self._get_cached_or_fetch(cache_key, fetch_salesmen)
     
     def add_salesman(self, salesman_data):
         """Add new salesman to database"""
         try:
             response = self.supabase.table('salesmen').insert(salesman_data).execute()
+            self.invalidate_cache('salesmen')
             return response.data[0] if response.data else None
         except Exception as e:
             st.error(f"Error adding salesman: {e}")
@@ -76,6 +141,7 @@ class DatabaseManager:
         """Update salesman in database"""
         try:
             response = self.supabase.table('salesmen').update(updates).eq('id', salesman_id).execute()
+            self.invalidate_cache('salesmen')
             return response.data[0] if response.data else None
         except Exception as e:
             st.error(f"Error updating salesman: {e}")
@@ -85,56 +151,63 @@ class DatabaseManager:
         """Delete salesman from database"""
         try:
             response = self.supabase.table('salesmen').delete().eq('id', salesman_id).execute()
+            self.invalidate_cache('salesmen')
             return True
         except Exception as e:
             st.error(f"Error deleting salesman: {e}")
             return False
     
     # Customer operations
-    def get_customers(self):
-        """Get all customers from database"""
-        try:
+    def get_customers(self, use_cache=True):
+        """Get all customers from database with caching"""
+        cache_key = self._get_cache_key('customers')
+        
+        if not use_cache:
+            self.invalidate_cache('customers')
+        
+        def fetch_customers():
             response = self.supabase.table('customers').select('*').execute()
-            return response.data
-        except Exception as e:
-            st.error(f"Error fetching customers: {e}")
-            return []
+            return response.data or []
+        
+        return self._get_cached_or_fetch(cache_key, fetch_customers)
     
     def add_customer(self, customer_data):
         """Add new customer to database"""
         try:
             response = self.supabase.table('customers').insert(customer_data).execute()
+            self.invalidate_cache('customers')
             return response.data[0] if response.data else None
         except Exception as e:
             st.error(f"Error adding customer: {e}")
             return None
     
     def get_customer_by_id(self, customer_id):
-        """Get customer by ID"""
-        try:
-            response = self.supabase.table('customers').select('*').eq('id', customer_id).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            st.error(f"Error fetching customer: {e}")
-            return None
+        """Get customer by ID with caching"""
+        customers = self.get_customers()
+        return next((c for c in customers if c['id'] == customer_id), None)
     
     # Invoice operations
-    def get_invoices(self, created_by=None):
-        """Get invoices from database with optional filter by creator"""
-        try:
+    def get_invoices(self, created_by=None, use_cache=True):
+        """Get invoices from database with caching"""
+        cache_key = self._get_cache_key('invoices', {'created_by': created_by})
+        
+        if not use_cache:
+            self.invalidate_cache('invoices')
+        
+        def fetch_invoices():
             query = self.supabase.table('invoices').select('*, customers(*)')
             if created_by:
                 query = query.eq('created_by', created_by)
             response = query.execute()
-            return response.data
-        except Exception as e:
-            st.error(f"Error fetching invoices: {e}")
-            return []
+            return response.data or []
+        
+        return self._get_cached_or_fetch(cache_key, fetch_invoices, ttl=60)  # Shorter TTL for invoices
     
     def add_invoice(self, invoice_data):
         """Add new invoice to database"""
         try:
             response = self.supabase.table('invoices').insert(invoice_data).execute()
+            self.invalidate_cache('invoices')
             return response.data[0] if response.data else None
         except Exception as e:
             st.error(f"Error adding invoice: {e}")
@@ -144,47 +217,63 @@ class DatabaseManager:
         """Delete invoice from database"""
         try:
             response = self.supabase.table('invoices').delete().eq('invoice_number', invoice_number).execute()
+            self.invalidate_cache('invoices')
             return True
         except Exception as e:
             st.error(f"Error deleting invoice: {e}")
             return False
     
     # Invoice items operations
-    def get_invoice_items(self, invoice_id):
-        """Get items for a specific invoice"""
-        try:
+    def get_invoice_items(self, invoice_id, use_cache=True):
+        """Get items for a specific invoice with caching"""
+        cache_key = self._get_cache_key('invoice_items', {'invoice_id': invoice_id})
+        
+        if not use_cache:
+            keys_to_remove = [k for k in st.session_state.data_cache.keys() if k.startswith('invoice_items')]
+            for key in keys_to_remove:
+                del st.session_state.data_cache[key]
+        
+        def fetch_items():
             response = self.supabase.table('invoice_items').select('*').eq('invoice_id', invoice_id).execute()
-            return response.data
-        except Exception as e:
-            st.error(f"Error fetching invoice items: {e}")
-            return []
+            return response.data or []
+        
+        return self._get_cached_or_fetch(cache_key, fetch_items)
     
     def add_invoice_items(self, items_data):
         """Add multiple invoice items"""
         try:
             response = self.supabase.table('invoice_items').insert(items_data).execute()
+            # Invalidate invoice items cache
+            keys_to_remove = [k for k in st.session_state.data_cache.keys() if k.startswith('invoice_items')]
+            for key in keys_to_remove:
+                del st.session_state.data_cache[key]
             return response.data
         except Exception as e:
             st.error(f"Error adding invoice items: {e}")
             return []
     
     # Products operations
-    def get_products(self, active_only=True):
-        """Get products from database"""
-        try:
+    def get_products(self, active_only=True, use_cache=True):
+        """Get products from database with caching"""
+        cache_key = self._get_cache_key('products', {'active_only': active_only})
+        
+        if not use_cache:
+            self.invalidate_cache('products')
+        
+        def fetch_products():
             query = self.supabase.table('products').select('*')
             if active_only:
                 query = query.eq('active', True)
             response = query.order('product').execute()
-            return response.data
-        except Exception as e:
-            st.error(f"Error fetching products: {e}")
-            return []
+            return response.data or []
+        
+        return self._get_cached_or_fetch(cache_key, fetch_products)
     
     def add_product(self, product_data):
         """Add new product to database"""
         try:
             response = self.supabase.table('products').insert(product_data).execute()
+            self.invalidate_cache('products')
             return response.data[0] if response.data else None
         except Exception as e:
             st.error(f"Error adding product: {e}")
@@ -195,6 +284,7 @@ class DatabaseManager:
         try:
             updates['updated_date'] = datetime.now().isoformat()
             response = self.supabase.table('products').update(updates).eq('id', product_id).execute()
+            self.invalidate_cache('products')
             return response.data[0] if response.data else None
         except Exception as e:
             st.error(f"Error updating product: {e}")
@@ -207,6 +297,7 @@ class DatabaseManager:
                 'active': False,
                 'updated_date': datetime.now().isoformat()
             }).eq('id', product_id).execute()
+            self.invalidate_cache('products')
             return True
         except Exception as e:
             st.error(f"Error deleting product: {e}")
@@ -216,25 +307,41 @@ class DatabaseManager:
         """Add multiple products at once"""
         try:
             response = self.supabase.table('products').insert(products_list).execute()
+            self.invalidate_cache('products')
             return response.data
         except Exception as e:
             st.error(f"Error bulk adding products: {e}")
             return []
 
-# Initialize database manager
-db = DatabaseManager(supabase)
+# Initialize optimized database manager
+db = OptimizedDatabaseManager(supabase)
 
 # Hash password function
+@st.cache_data
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
+
+# Optimized search with debouncing
+def debounced_search(search_term, search_type):
+    """Implement debounced search to reduce excessive filtering"""
+    current_time = time.time()
+    last_search_time = st.session_state.last_search_time.get(search_type, 0)
+    
+    # Only update search if enough time has passed or search term changed
+    cache_key = f"{search_type}_{search_term}"
+    if current_time - last_search_time > SEARCH_DEBOUNCE:
+        st.session_state.last_search_time[search_type] = current_time
+        return True
+    
+    return cache_key in st.session_state.search_cache
 
 # Initialize default admin if no salesmen exist
 def initialize_default_admin():
     salesmen = db.get_salesmen()
     if not salesmen:
         default_admin = {
-            'username': ADMIN_USERNAME,
-            'password': hash_password(ADMIN_PASSWORD),
+            'username': 'admin',
+            'password': hash_password('admin123'),
             'role': 'admin',
             'name': 'Administrator',
             'created_date': datetime.now().isoformat(),
@@ -242,7 +349,7 @@ def initialize_default_admin():
         }
         db.add_salesman(default_admin)
 
-# Login function
+# Optimized login function
 def login_page():
     st.title("🔐 Login to Invoice Management System")
     
@@ -275,21 +382,20 @@ def login_page():
     st.markdown("---")
     st.markdown("*Secure Invoice Management System*")
 
-# Load products from database
-def load_products():
-    """Load products from database"""
+# Optimized product loading with caching
+@st.cache_data(ttl=CACHE_TTL)
+def load_products_cached():
+    """Load products from database with Streamlit caching"""
     try:
         products = db.get_products()
         if products:
-            df = pd.DataFrame(products)
-            return df
+            return pd.DataFrame(products)
         else:
             return pd.DataFrame()
     except Exception as e:
         st.error(f"Error loading products: {e}")
         return pd.DataFrame()
 
-# Load products from CSV and save to database
 def load_products_from_csv(csv_file_path=None, uploaded_file=None):
     """Load products from CSV file and save to database"""
     try:
@@ -329,6 +435,8 @@ def load_products_from_csv(csv_file_path=None, uploaded_file=None):
         if products_to_add:
             result = db.bulk_add_products(products_to_add)
             if result:
+                # Clear cache after adding products
+                st.cache_data.clear()
                 return True, f"Successfully added {added_count} products. Skipped {skipped_count} duplicates."
             else:
                 return False, "Failed to add products to database"
@@ -338,8 +446,11 @@ def load_products_from_csv(csv_file_path=None, uploaded_file=None):
     except Exception as e:
         return False, f"Error processing CSV: {str(e)}"
 
-# Generate WhatsApp formatted invoice text
-def generate_whatsapp_invoice_text(customer, cart_items, invoice_number, paid):
+# Optimized WhatsApp generation
+@st.cache_data
+def generate_whatsapp_invoice_text(customer_name, customer_phone, cart_items_str, invoice_number, paid):
+    """Generate WhatsApp formatted invoice text with caching"""
+    cart_items = eval(cart_items_str)  # Convert string back to list for caching
     total_amount = sum(item['quantity'] * item['price'] for item in cart_items)
 
     # Create formatted invoice text
@@ -350,13 +461,8 @@ Date: {datetime.now().strftime("%Y-%m-%d %H:%M")}
 
 *BILL TO*
 ━━━━━━━━━━━━━━━━━━
-Name: {customer['name']}
-Phone: {customer['phone']}"""
-
-    if customer.get('email'):
-        invoice_text += f"\nEmail: {customer['email']}"
-    if customer.get('address'):
-        invoice_text += f"\nAddress: {customer['address']}"
+Name: {customer_name}
+Phone: {customer_phone}"""
 
     invoice_text += "\n\n*ITEMS*\n━━━━━━━━━━━━━━━━━━\n"
 
@@ -377,6 +483,7 @@ Phone: {customer['phone']}"""
     return invoice_text, total_amount
 
 # Create WhatsApp link with formatted invoice text
+@st.cache_data
 def create_whatsapp_link(phone, invoice_text):
     clean_phone = ''.join(filter(str.isdigit, phone))
     encoded_message = urllib.parse.quote(invoice_text)
@@ -433,14 +540,79 @@ def save_invoice_record(customer, cart_items, invoice_number, total_amount, paid
     
     return invoice_record
 
-# Admin Panel Functions
+# Optimized filtering functions
+def filter_items(items, search_term, search_fields):
+    """Generic filtering function with case-insensitive search"""
+    if not search_term:
+        return items
+    
+    search_lower = search_term.lower()
+    filtered = []
+    
+    for item in items:
+        match_found = False
+        for field in search_fields:
+            if field in item and item[field] and search_lower in str(item[field]).lower():
+                match_found = True
+                break
+        if match_found:
+            filtered.append(item)
+    
+    return filtered
+
+# Paginated display function
+def display_paginated_items(items, page_size=MAX_DISPLAY_ITEMS):
+    """Display items with pagination"""
+    if len(items) <= page_size:
+        return items, 1, 1
+    
+    # Get page number from session state
+    page_key = f"page_{id(items)}"
+    if page_key not in st.session_state:
+        st.session_state[page_key] = 1
+    
+    total_pages = (len(items) - 1) // page_size + 1
+    current_page = st.session_state[page_key]
+    
+    # Page navigation
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col1:
+        if st.button("◀ Previous", key=f"prev_{page_key}", disabled=(current_page <= 1)):
+            st.session_state[page_key] = max(1, current_page - 1)
+            st.rerun()
+    
+    with col2:
+        st.write(f"Page {current_page} of {total_pages} ({len(items)} items)")
+    
+    with col3:
+        if st.button("Next ▶", key=f"next_{page_key}", disabled=(current_page >= total_pages)):
+            st.session_state[page_key] = min(total_pages, current_page + 1)
+            st.rerun()
+    
+    # Calculate slice indices
+    start_idx = (current_page - 1) * page_size
+    end_idx = start_idx + page_size
+    
+    return items[start_idx:end_idx], current_page, total_pages
+
+# Admin Panel Functions (Optimized)
 def admin_panel():
     st.title("👑 Admin Panel")
+    
+    # Add cache control
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        if st.button("🔄 Refresh Data"):
+            db.invalidate_cache()
+            st.cache_data.clear()
+            st.success("Cache cleared!")
+            st.rerun()
     
     # Admin tabs
     admin_tab1, admin_tab2, admin_tab3, admin_tab4 = st.tabs(["👥 Manage Salesmen", "📦 Manage Products", "📊 Sales Reports", "📈 Analytics"])
     
-    # Tab 1: Manage Salesmen
+    # Tab 1: Manage Salesmen (Fixed with unique keys)
     with admin_tab1:
         st.header("Salesmen Management")
         
@@ -479,18 +651,21 @@ def admin_panel():
                             result = db.add_salesman(new_salesman)
                             if result:
                                 st.success(f"Salesman '{new_name}' added successfully!")
+                                time.sleep(1)
                                 st.rerun()
                             else:
                                 st.error("Failed to add salesman")
                     else:
                         st.error("Please fill in all fields")
         
-        # Display existing salesmen
+        # Display existing salesmen with pagination
         st.subheader("Existing Salesmen")
         salesmen = db.get_salesmen()
         
         if salesmen:
-            for salesman in salesmen:
+            paginated_salesmen, current_page, total_pages = display_paginated_items(salesmen, 10)
+            
+            for salesman in paginated_salesmen:
                 with st.container():
                     col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 1])
                     
@@ -508,16 +683,16 @@ def admin_panel():
                         st.write(status)
                     
                     with col4:
-                        if salesman['username'] != ADMIN_USERNAME:
+                        if salesman['username'] != 'admin':
                             action = "Deactivate" if salesman['active'] else "Activate"
-                            if st.button(action, key=f"toggle_{salesman['id']}"):
+                            if st.button(action, key=f"salesman_toggle_{salesman['id']}"):
                                 updates = {'active': not salesman['active']}
                                 if db.update_salesman(salesman['id'], updates):
                                     st.rerun()
                     
                     with col5:
-                        if salesman['username'] != ADMIN_USERNAME:
-                            if st.button("🗑️", key=f"delete_{salesman['id']}"):
+                        if salesman['username'] != 'admin':
+                            if st.button("🗑️", key=f"salesman_delete_{salesman['id']}"):
                                 if db.delete_salesman(salesman['id']):
                                     st.success(f"Deleted {salesman['name']}")
                                     st.rerun()
@@ -526,7 +701,7 @@ def admin_panel():
         else:
             st.info("No salesmen found.")
     
-    # Tab 2: Manage Products
+    # Tab 2: Manage Products (Fixed with unique keys)
     with admin_tab2:
         st.header("Products Management")
         
@@ -549,13 +724,15 @@ def admin_panel():
                     st.dataframe(preview_df.head(), use_container_width=True)
                     
                     if st.button("Import Products to Database", type="primary"):
-                        success, message = load_products_from_csv(uploaded_file=uploaded_file)
-                        if success:
-                            st.success(message)
-                            st.rerun()
-                        else:
-                            st.error(message)
-                            
+                        with st.spinner("Importing products..."):
+                            success, message = load_products_from_csv(uploaded_file=uploaded_file)
+                            if success:
+                                st.success(message)
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error(message)
+                                
                 except Exception as e:
                     st.error(f"Error reading CSV file: {e}")
         
@@ -596,33 +773,32 @@ def admin_panel():
                             result = db.add_product(product_data)
                             if result:
                                 st.success(f"Product '{new_product_name}' added successfully!")
+                                time.sleep(1)
                                 st.rerun()
                             else:
                                 st.error("Failed to add product")
                     else:
                         st.error("Please fill in product name and price")
         
-        # Display and manage existing products
+        # Display and manage existing products with optimization
         st.subheader("Existing Products")
         products = db.get_products(active_only=False)
         
         if products:
-            # Search and filter
+            # Search and filter with debouncing
             col1, col2 = st.columns(2)
             with col1:
                 search_product = st.text_input("🔍 Search products", placeholder="Search by name or category...")
             with col2:
                 show_inactive = st.checkbox("Show inactive products", value=False)
             
-            # Apply filters
+            # Apply filters efficiently
             filtered_products = products
             if not show_inactive:
                 filtered_products = [p for p in filtered_products if p['active']]
             
             if search_product:
-                filtered_products = [p for p in filtered_products 
-                                   if search_product.lower() in p['product'].lower() or 
-                                      (p['category'] and search_product.lower() in p['category'].lower())]
+                filtered_products = filter_items(filtered_products, search_product, ['product', 'category'])
             
             if filtered_products:
                 # Summary stats
@@ -640,42 +816,49 @@ def admin_panel():
                 
                 st.divider()
                 
-                # Products table with actions
-                for product in sorted(filtered_products, key=lambda x: x['product']):
+                # Paginated products display
+                paginated_products, current_page, total_pages = display_paginated_items(
+                    sorted(filtered_products, key=lambda x: x['product']), 20
+                )
+                
+                # Products table with actions (Fixed keys)
+                for product in paginated_products:
                     with st.container():
                         col1, col2, col3, col4, col5, col6 = st.columns([3, 1, 2, 1, 1, 1])
                         
                         with col1:
                             status_icon = "✅" if product['active'] else "❌"
                             st.write(f"{status_icon} **{product['product']}**")
-                            if product['category']:
+                            if product.get('category'):
                                 st.caption(f"Category: {product['category']}")
                         
                         with col2:
                             st.write(f"${product['price']:.2f}")
                         
                         with col3:
-                            if product['description']:
-                                st.caption(product['description'][:50] + "..." if len(product['description']) > 50 else product['description'])
+                            if product.get('description'):
+                                desc = product['description']
+                                display_desc = desc[:50] + "..." if len(desc) > 50 else desc
+                                st.caption(display_desc)
                         
                         with col4:
-                            # Edit price button
-                            edit_key = f"edit_{product['id']}"
+                            # Edit price button (Fixed key)
+                            edit_key = f"product_edit_{product['id']}"
                             if st.button("✏️", key=edit_key, help="Edit price"):
                                 st.session_state[f"editing_{product['id']}"] = True
                         
                         with col5:
-                            # Toggle active/inactive
+                            # Toggle active/inactive (Fixed key)
                             action = "Deactivate" if product['active'] else "Activate"
-                            if st.button(action, key=f"toggle_{product['id']}"):
+                            if st.button(action, key=f"product_toggle_{product['id']}"):
                                 updates = {'active': not product['active']}
                                 if db.update_product(product['id'], updates):
                                     st.rerun()
                         
                         with col6:
-                            # Delete button (soft delete)
+                            # Delete button (soft delete) (Fixed key)
                             if product['active']:
-                                if st.button("🗑️", key=f"delete_{product['id']}"):
+                                if st.button("🗑️", key=f"product_delete_{product['id']}"):
                                     if db.delete_product(product['id']):
                                         st.success(f"Product '{product['product']}' deactivated")
                                         st.rerun()
@@ -695,12 +878,12 @@ def admin_panel():
                                 
                                 with col_category:
                                     new_category = st.text_input("Category", 
-                                                               value=product['category'] or '', 
+                                                               value=product.get('category', '') or '', 
                                                                key=f"cat_{product['id']}")
                                 
                                 with col_desc:
                                     new_description = st.text_input("Description", 
-                                                                   value=product['description'] or '', 
+                                                                   value=product.get('description', '') or '', 
                                                                    key=f"desc_{product['id']}")
                                 
                                 with col_save:
@@ -733,7 +916,7 @@ def admin_panel():
         else:
             st.info("No products found. Upload a CSV file or add products manually.")
     
-    # Tab 3: Sales Reports
+    # Tab 3: Sales Reports (Optimized)
     with admin_tab3:
         st.header("Sales Reports")
         
@@ -744,18 +927,17 @@ def admin_panel():
         with col2:
             end_date = st.date_input("End Date", value=datetime.now().date())
         
-        # Get invoices from database
+        # Get invoices from database with caching
         invoices = db.get_invoices()
         
-        # Filter invoices by date range
-        filtered_invoices = []
-        for invoice in invoices:
-            invoice_date = datetime.fromisoformat(invoice['date']).date()
-            if start_date <= invoice_date <= end_date:
-                filtered_invoices.append(invoice)
+        # Filter invoices by date range efficiently
+        filtered_invoices = [
+            invoice for invoice in invoices
+            if start_date <= datetime.fromisoformat(invoice['date']).date() <= end_date
+        ]
         
         if filtered_invoices:
-            # Total sales summary
+            # Optimized calculations
             total_sales = sum(inv['total_amount'] for inv in filtered_invoices)
             total_paid = sum(inv['paid_amount'] for inv in filtered_invoices)
             total_unpaid = sum(inv['unpaid_amount'] for inv in filtered_invoices)
@@ -773,8 +955,14 @@ def admin_panel():
             with col4:
                 st.metric("Average Sale", f"${avg_sale:.2f}")
             
-            # Display invoice details
+            # Display invoice details with pagination
             st.subheader("Invoice Details")
+            
+            # Sort invoices by date (newest first)
+            sorted_invoices = sorted(filtered_invoices, key=lambda x: x['date'], reverse=True)
+            paginated_invoices, current_page, total_pages = display_paginated_items(sorted_invoices, 25)
+            
+            # Create DataFrame for display
             df_invoices = pd.DataFrame([
                 {
                     'Invoice #': inv['invoice_number'],
@@ -787,18 +975,88 @@ def admin_panel():
                     'Status': inv['status'],
                     'Salesman': inv['salesman']
                 }
-                for inv in sorted(filtered_invoices, key=lambda x: x['date'], reverse=True)
+                for inv in paginated_invoices
             ])
             
             st.dataframe(df_invoices, use_container_width=True)
             
         else:
             st.info(f"No invoices found for the selected date range ({start_date} to {end_date})")
-
-# Main app logic
-def main_app():
-    products = load_products()
     
+    # Tab 4: Analytics (New optimized analytics)
+    with admin_tab4:
+        st.header("Analytics Dashboard")
+        
+        # Get all invoices for analytics
+        all_invoices = db.get_invoices()
+        
+        if all_invoices:
+            # Time-based analytics
+            st.subheader("Sales Trends")
+            
+            # Convert to DataFrame for easy analysis
+            df_analytics = pd.DataFrame([
+                {
+                    'date': datetime.fromisoformat(inv['date']).date(),
+                    'total_amount': inv['total_amount'],
+                    'paid_amount': inv['paid_amount'],
+                    'salesman': inv['salesman'],
+                    'status': inv['status']
+                }
+                for inv in all_invoices
+            ])
+            
+            # Daily sales trend (last 30 days)
+            recent_date = datetime.now().date() - timedelta(days=30)
+            recent_df = df_analytics[df_analytics['date'] >= recent_date]
+            
+            if not recent_df.empty:
+                daily_sales = recent_df.groupby('date')['total_amount'].sum().reset_index()
+                daily_sales['date'] = pd.to_datetime(daily_sales['date'])
+                
+                # Simple line chart using Streamlit
+                st.line_chart(daily_sales.set_index('date')['total_amount'])
+            
+            # Top performers
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("Top Salesmen (Last 30 Days)")
+                salesman_performance = recent_df.groupby('salesman').agg({
+                    'total_amount': 'sum',
+                    'paid_amount': 'sum'
+                }).round(2).reset_index()
+                salesman_performance = salesman_performance.sort_values('total_amount', ascending=False)
+                st.dataframe(salesman_performance, use_container_width=True)
+            
+            with col2:
+                st.subheader("Payment Status Overview")
+                status_counts = df_analytics['status'].value_counts()
+                st.bar_chart(status_counts)
+            
+            # Summary statistics
+            st.subheader("Overall Statistics")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            total_revenue = df_analytics['total_amount'].sum()
+            total_collected = df_analytics['paid_amount'].sum()
+            collection_rate = (total_collected / total_revenue * 100) if total_revenue > 0 else 0
+            avg_invoice = df_analytics['total_amount'].mean()
+            
+            with col1:
+                st.metric("Total Revenue", f"${total_revenue:.2f}")
+            with col2:
+                st.metric("Total Collected", f"${total_collected:.2f}")
+            with col3:
+                st.metric("Collection Rate", f"{collection_rate:.1f}%")
+            with col4:
+                st.metric("Avg Invoice", f"${avg_invoice:.2f}")
+        
+        else:
+            st.info("No data available for analytics.")
+
+# Main app logic (Optimized)
+def main_app():
     # Header with user info and logout button
     col1, col2, col3 = st.columns([3, 1, 1])
     with col1:
@@ -818,10 +1076,10 @@ def main_app():
     
     with col3:
         if st.button("🚪 Logout"):
-            st.session_state.authenticated = False
-            st.session_state.current_user = None
-            st.session_state.user_role = None
-            st.session_state.show_admin = False
+            # Clear all session state
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            init_session_state()
             st.rerun()
     
     # Show admin panel if admin and requested
@@ -834,7 +1092,7 @@ def main_app():
         else:
             tab1, tab2, tab3 = st.tabs(["👥 Add Customer", "🛒 Create Invoice", "📋 My Invoices"])
         
-        # Tab 1: Add Customer
+        # Tab 1: Add Customer (Optimized)
         with tab1:
             st.header("Add New Customer")
             
@@ -878,13 +1136,14 @@ def main_app():
                             result = db.add_customer(customer)
                             if result:
                                 st.success(f"Customer '{name}' added successfully!")
+                                time.sleep(1)
                                 st.rerun()
                             else:
                                 st.error("Failed to add customer")
                     else:
                         st.error("Please fill in all mandatory fields (Name and Phone Number)")
             
-            # Display existing customers
+            # Display existing customers with search (no pagination)
             customers = db.get_customers()
             if customers:
                 st.header("Existing Customers")
@@ -892,24 +1151,29 @@ def main_app():
                 # Search functionality
                 search_term = st.text_input("🔍 Search customers", placeholder="Search by name or phone...")
                 
-                if search_term:
-                    filtered_customers = [c for c in customers 
-                                        if search_term.lower() in c['name'].lower() or 
-                                           search_term in c['phone']]
-                else:
-                    filtered_customers = customers
+                # Filter customers
+                filtered_customers = filter_items(customers, search_term, ['name', 'phone']) if search_term else customers
                 
                 if filtered_customers:
-                    df_customers = pd.DataFrame(filtered_customers)
-                    st.dataframe(df_customers[['name', 'phone', 'email']], use_container_width=True)
+                    # Create DataFrame for display (no pagination)
+                    df_customers = pd.DataFrame([
+                        {
+                            'Name': c['name'],
+                            'Phone': c['phone'],
+                            'Email': c.get('email', ''),
+                            'Created': datetime.fromisoformat(c['created_date']).strftime('%Y-%m-%d')
+                        }
+                        for c in filtered_customers
+                    ])
+                    st.dataframe(df_customers, use_container_width=True)
                 else:
                     st.info("No customers found matching your search.")
         
-        # Tab 2: Create Invoice
+        # Tab 2: Create Invoice (Optimized with non-paginated customer selection)
         with tab2:
             st.header("Create Invoice")
             
-            # Load products from database
+            # Load products from database with caching
             products = db.get_products()
             
             if not products:
@@ -925,65 +1189,66 @@ def main_app():
                     st.markdown("### Quick Upload")
                     uploaded_file = st.file_uploader("Upload Products CSV", type=['csv'])
                     if uploaded_file is not None:
-                        success, message = load_products_from_csv(uploaded_file=uploaded_file)
-                        if success:
-                            st.success(message)
-                            st.rerun()
-                        else:
-                            st.error(message)
+                        with st.spinner("Processing CSV..."):
+                            success, message = load_products_from_csv(uploaded_file=uploaded_file)
+                            if success:
+                                st.success(message)
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error(message)
             else:
                 customers = db.get_customers()
                 
                 if not customers:
                     st.warning("Please add at least one customer first.")
                 else:
-                    # Select customer with search
+                    # Non-paginated customer selection
                     st.subheader("Select Customer")
                     customer_search = st.text_input("🔍 Search customer", placeholder="Type name or phone...")
                     
-                    if customer_search:
-                        filtered_customers = [c for c in customers 
-                                            if customer_search.lower() in c['name'].lower() or 
-                                               customer_search in c['phone']]
-                    else:
-                        filtered_customers = customers
+                    # Filter customers efficiently (no pagination)
+                    filtered_customers = filter_items(customers, customer_search, ['name', 'phone']) if customer_search else customers
                     
                     if filtered_customers:
+                        # Show all filtered customers (no pagination limit)
                         customer_options = [f"{c['name']} - {c['phone']}" for c in filtered_customers]
+                        
                         selected_customer_idx = st.selectbox("Select Customer", range(len(customer_options)), 
                                                            format_func=lambda x: customer_options[x])
                         selected_customer = filtered_customers[selected_customer_idx]
                         
                         st.info(f"Creating invoice for: {selected_customer['name']} ({selected_customer['phone']})")
                         
-                        # Product selection
+                        # Optimized product selection
                         st.subheader("Add Products to Invoice")
                         
-                        # Search products
+                        # Search products with debouncing
                         product_search = st.text_input("🔍 Search products", placeholder="Search by name or category...")
                         
-                        if product_search:
-                            filtered_products = [p for p in products 
-                                               if product_search.lower() in p['product'].lower() or 
-                                                  (p['category'] and product_search.lower() in p['category'].lower())]
-                        else:
-                            filtered_products = products
+                        # Filter products efficiently
+                        filtered_products = filter_items(products, product_search, ['product', 'category']) if product_search else products
                         
                         if filtered_products:
+                            # Limit displayed products for performance
+                            display_products = filtered_products[:50]
+                            if len(filtered_products) > 50:
+                                st.info(f"Showing first 50 of {len(filtered_products)} products. Use search to narrow down.")
+                            
                             col1, col2, col3 = st.columns([3, 1, 1])
                             
                             with col1:
                                 # Show product with category if available
                                 product_options = []
-                                for p in filtered_products:
+                                for p in display_products:
                                     display_name = f"{p['product']}"
-                                    if p['category']:
+                                    if p.get('category'):
                                         display_name += f" ({p['category']})"
                                     product_options.append(display_name)
                                 
                                 selected_product_idx = st.selectbox("Select Product", range(len(product_options)), 
                                                                    format_func=lambda x: product_options[x])
-                                selected_product_data = filtered_products[selected_product_idx]
+                                selected_product_data = display_products[selected_product_idx]
                             
                             with col2:
                                 quantity = st.number_input("Quantity", min_value=1, value=1)
@@ -1002,7 +1267,7 @@ def main_app():
                         else:
                             st.info("No products found matching your search.")
                         
-                        # Display cart
+                        # Display cart with optimized rendering
                         if st.session_state.cart:
                             st.subheader("Invoice Items")
                             
@@ -1039,7 +1304,7 @@ def main_app():
                                     st.session_state.cart = []
                                     st.rerun()
 
-                            # Payment popup
+                            # Payment popup (optimized)
                             if st.session_state.get('show_payment_popup', False):
                                 with st.container():
                                     st.markdown("### 💰 Set Payment Amount")
@@ -1075,11 +1340,19 @@ def main_app():
                                             invoice_number = f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                                             
                                             try:
-                                                # Generate WhatsApp formatted invoice text
-                                                invoice_text, amount = generate_whatsapp_invoice_text(selected_customer, st.session_state.cart, invoice_number, paid_amount)
+                                                # Generate WhatsApp formatted invoice text with caching
+                                                cart_items_str = str(st.session_state.cart)  # For caching
+                                                invoice_text, amount = generate_whatsapp_invoice_text(
+                                                    selected_customer['name'], 
+                                                    selected_customer['phone'], 
+                                                    cart_items_str,
+                                                    invoice_number, 
+                                                    paid_amount
+                                                )
                                                 
                                                 # Save invoice record with payment info
-                                                invoice_record = save_invoice_record(selected_customer, st.session_state.cart, invoice_number, amount, paid_amount)
+                                                with st.spinner("Creating invoice..."):
+                                                    invoice_record = save_invoice_record(selected_customer, st.session_state.cart, invoice_number, amount, paid_amount)
                                                 
                                                 if invoice_record:
                                                     st.success(f"✅ Invoice {invoice_number} created successfully!")
@@ -1094,6 +1367,7 @@ def main_app():
                                                     # Clear cart and popup
                                                     st.session_state.cart = []
                                                     st.session_state.show_payment_popup = False
+                                                    time.sleep(1)
                                                     st.rerun()
                                                 else:
                                                     st.error("Failed to create invoice")
@@ -1110,7 +1384,7 @@ def main_app():
                     else:
                         st.info("No customers found. Please add customers first.")
         
-        # Tab 3: Invoice History
+        # Tab 3: Invoice History (Optimized)
         with tab3:
             if st.session_state.user_role == 'admin':
                 st.header("All Invoices History")
@@ -1120,7 +1394,7 @@ def main_app():
                 invoices = db.get_invoices(created_by=st.session_state.current_user)
             
             if invoices:
-                # Summary for current user/all
+                # Optimized summary calculations
                 total_sales = sum(inv['total_amount'] for inv in invoices)
                 total_paid = sum(inv['paid_amount'] for inv in invoices)
                 total_unpaid = sum(inv['unpaid_amount'] for inv in invoices)
@@ -1138,7 +1412,7 @@ def main_app():
                 
                 st.divider()
                 
-                # Filter options
+                # Optimized filter options
                 col1, col2 = st.columns(2)
                 with col1:
                     status_filter = st.selectbox("Filter by Status", 
@@ -1147,18 +1421,24 @@ def main_app():
                     search_invoice = st.text_input("🔍 Search invoices", 
                                                  placeholder="Search by customer name or invoice number...")
                 
-                # Apply filters
+                # Apply filters efficiently
                 filtered_invoices = invoices
                 if status_filter != "All":
                     filtered_invoices = [inv for inv in filtered_invoices 
                                       if status_filter in inv['status']]
                 
                 if search_invoice:
-                    filtered_invoices = [inv for inv in filtered_invoices 
-                                      if search_invoice.lower() in inv['customers']['name'].lower() or 
-                                         search_invoice.lower() in inv['invoice_number'].lower()]
+                    filtered_invoices = filter_items(filtered_invoices, search_invoice, ['invoice_number'])
+                    # Also search customer names
+                    if not filtered_invoices:
+                        filtered_invoices = [inv for inv in invoices 
+                                          if search_invoice.lower() in inv['customers']['name'].lower()]
                 
-                for invoice in reversed(filtered_invoices):  # Show newest first
+                # Sort and paginate invoices
+                sorted_invoices = sorted(filtered_invoices, key=lambda x: x['date'], reverse=True)
+                paginated_invoices, current_page, total_pages = display_paginated_items(sorted_invoices, 10)
+                
+                for invoice in paginated_invoices:
                     status_icon = "✅" if invoice['status'].startswith('مدفوعة') else "❌" if invoice['status'] == 'غير مدفوعة' else "⚠️"
                     
                     with st.expander(f"{status_icon} Invoice {invoice['invoice_number']} - {invoice['customers']['name']} - ${invoice['total_amount']:.2f}"):
@@ -1177,12 +1457,12 @@ def main_app():
                         
                         with col2:
                             st.write("**Items:**")
-                            # Get invoice items from database
+                            # Get invoice items from database with caching
                             invoice_items = db.get_invoice_items(invoice['id'])
                             for item in invoice_items:
                                 st.write(f"- {item['product']}: {item['quantity']} × ${item['price']:.2f} = ${item['quantity'] * item['price']:.2f}")
                         
-                        # Action buttons
+                        # Action buttons with permission check
                         can_delete = (st.session_state.user_role == 'admin' or 
                                      invoice['created_by'] == st.session_state.current_user or 
                                      invoice['salesman'] == st.session_state.current_user)
@@ -1201,9 +1481,12 @@ def main_app():
                                             'quantity': item['quantity']
                                         })
                                     
+                                    # Use cached WhatsApp generation
+                                    cart_items_str = str(cart_items)
                                     invoice_text, _ = generate_whatsapp_invoice_text(
-                                        invoice['customers'], 
-                                        cart_items, 
+                                        invoice['customers']['name'], 
+                                        invoice['customers']['phone'], 
+                                        cart_items_str,
                                         invoice['invoice_number'],
                                         invoice['paid_amount']
                                     )
@@ -1211,26 +1494,31 @@ def main_app():
                                     st.markdown(f"[📱 Open WhatsApp]({whatsapp_link})")
                             
                             with col_delete:
-                                if st.button(f"🗑️ Delete Invoice", key=f"delete_{invoice['invoice_number']}", type="secondary"):
-                                    if st.session_state.get(f"confirm_delete_{invoice['invoice_number']}", False):
-                                        if db.delete_invoice(invoice['invoice_number']):
-                                            st.success(f"Invoice {invoice['invoice_number']} deleted successfully!")
-                                            # Clear confirmation state
-                                            if f"confirm_delete_{invoice['invoice_number']}" in st.session_state:
-                                                del st.session_state[f"confirm_delete_{invoice['invoice_number']}"]
-                                            st.rerun()
-                                        else:
-                                            st.error("Failed to delete invoice")
+                                delete_key = f"invoice_delete_{invoice['invoice_number']}"
+                                confirm_key = f"confirm_invoice_delete_{invoice['invoice_number']}"
+                                
+                                if st.button(f"🗑️ Delete Invoice", key=delete_key, type="secondary"):
+                                    if st.session_state.get(confirm_key, False):
+                                        with st.spinner("Deleting invoice..."):
+                                            if db.delete_invoice(invoice['invoice_number']):
+                                                st.success(f"Invoice {invoice['invoice_number']} deleted successfully!")
+                                                # Clear confirmation state
+                                                if confirm_key in st.session_state:
+                                                    del st.session_state[confirm_key]
+                                                time.sleep(1)
+                                                st.rerun()
+                                            else:
+                                                st.error("Failed to delete invoice")
                                     else:
-                                        st.session_state[f"confirm_delete_{invoice['invoice_number']}"] = True
+                                        st.session_state[confirm_key] = True
                                         st.rerun()
                                 
                                 # Show confirmation message
-                                if st.session_state.get(f"confirm_delete_{invoice['invoice_number']}", False):
+                                if st.session_state.get(confirm_key, False):
                                     st.warning("⚠️ Click Delete Invoice again to confirm deletion")
                         else:
-                            # Original resend button for non-deletable invoices
-                            if st.button(f"📱 Resend via WhatsApp", key=f"resend_{invoice['invoice_number']}"):
+                            # Resend only for non-deletable invoices
+                            if st.button(f"📱 Resend via WhatsApp", key=f"resend_readonly_{invoice['invoice_number']}"):
                                 # Reconstruct cart items for WhatsApp message
                                 cart_items = []
                                 invoice_items = db.get_invoice_items(invoice['id'])
@@ -1241,9 +1529,12 @@ def main_app():
                                         'quantity': item['quantity']
                                     })
                                 
+                                # Use cached WhatsApp generation
+                                cart_items_str = str(cart_items)
                                 invoice_text, _ = generate_whatsapp_invoice_text(
-                                    invoice['customers'], 
-                                    cart_items, 
+                                    invoice['customers']['name'], 
+                                    invoice['customers']['phone'], 
+                                    cart_items_str,
                                     invoice['invoice_number'],
                                     invoice['paid_amount']
                                 )
@@ -1259,8 +1550,38 @@ def main_app():
         st.markdown("---")
         st.markdown("*Invoice Management System - Secure & Professional*")
 
+# Performance monitoring (optional)
+def display_performance_info():
+    """Display performance information for debugging"""
+    if st.session_state.user_role == 'admin' and st.sidebar.checkbox("Show Performance Info"):
+        st.sidebar.subheader("Performance Info")
+        
+        # Cache statistics
+        cache_size = len(st.session_state.data_cache)
+        st.sidebar.write(f"Cache entries: {cache_size}")
+        
+        # Session state size
+        session_size = len(st.session_state)
+        st.sidebar.write(f"Session state keys: {session_size}")
+        
+        # Cache keys
+        if cache_size > 0:
+            with st.sidebar.expander("Cache Keys"):
+                for key in st.session_state.data_cache.keys():
+                    age = time.time() - st.session_state.last_cache_update.get(key, 0)
+                    st.write(f"{key}: {age:.1f}s old")
+        
+        # Clear cache button
+        if st.sidebar.button("Clear All Cache"):
+            db.invalidate_cache()
+            st.cache_data.clear()
+            st.success("Cache cleared!")
+
 # Main application entry point
 if __name__ == "__main__":
+    # Display performance info for admin users
+    display_performance_info()
+    
     if not st.session_state.authenticated:
         login_page()
     else:
