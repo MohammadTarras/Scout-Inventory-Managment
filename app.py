@@ -166,7 +166,7 @@ class OptimizedDatabaseManager:
             self.invalidate_cache('customers')
         
         def fetch_customers():
-            response = self.supabase.table('customers').select('*').execute()
+            response = self.supabase.table('customers').select('*').order('created_date', desc=True).execute()
             return response.data or []
         
         return self._get_cached_or_fetch(cache_key, fetch_customers)
@@ -195,7 +195,13 @@ class OptimizedDatabaseManager:
             self.invalidate_cache('invoices')
         
         def fetch_invoices():
-            query = self.supabase.table('invoices').select('*, customers(*)')
+            query = (
+                self.supabase
+                .table('invoices')
+                .select('*, customers(*)')
+                .order('date', desc=True)
+                .execute()
+            )
             if created_by:
                 query = query.eq('created_by', created_by)
             response = query.execute()
