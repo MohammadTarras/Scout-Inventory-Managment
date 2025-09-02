@@ -1236,9 +1236,8 @@ def main_app():
                         
                         if filtered_products:
                             # Limit displayed products for performance
-                            display_products = filtered_products[:50]
-                            if len(filtered_products) > 50:
-                                st.info(f"Showing first 50 of {len(filtered_products)} products. Use search to narrow down.")
+                            display_products = filtered_products
+              
                             
                             col1, col2, col3 = st.columns([3, 1, 1])
                             
