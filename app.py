@@ -200,7 +200,6 @@ class OptimizedDatabaseManager:
                 .table('invoices')
                 .select('*, customers(*)')
                 .order('date', desc=True)
-                .execute()
             )
             if created_by:
                 query = query.eq('created_by', created_by)
